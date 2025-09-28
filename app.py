@@ -335,11 +335,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     audio_for_merge = next((f for f in sorted(info.get('formats', []), key=lambda x: x.get('tbr') or 0, reverse=True)
                                             if f.get('acodec') != 'none' and f.get('vcodec') == 'none'), None)
                     if audio_for_merge:
-                        video_size = video_only.get('filesize') or video_only.get('filesize_approx')
-                        audio_size = audio_for_merge.get('filesize') or audio_for_merge.get('filesize_approx')
-                        total_size = (video_size or 0) + (audio_size or 0)
+                        # --- منطق جديد ومحسّن لتقدير الحجم ---
+                        duration = info.get('duration')
+                        video_size = video_only.get('filesize') or video_only.get('filesize_approx') or (video_only.get('tbr') * 1024 / 8 * duration if video_only.get('tbr') and duration else 0)
+                        audio_size = audio_for_merge.get('filesize') or audio_for_merge.get('filesize_approx') or (audio_for_merge.get('tbr') * 1024 / 8 * duration if audio_for_merge.get('tbr') and duration else 0)
+                        
+                        total_size = video_size + audio_size
                         best_format = video_only
-                        best_format['filesize_approx'] = total_size
+                        # نستخدم filesize_approx لتخزين الحجم المقدر
+                        # إذا كان الحجم 0، نجعله None ليظهر "غير معروف" بدلاً من 0.00
+                        best_format['filesize_approx'] = total_size if total_size > 0 else None
+                        
                         # سنقوم بدمج أفضل فيديو مع أفضل صوت
                         best_format['format_id'] = f"{video_only['format_id']}+{audio_for_merge['format_id']}"
 
@@ -640,12 +646,29 @@ def main():
                 CallbackQueryHandler(admin_close_panel, pattern="^admin_close$"),
                 CallbackQueryHandler(admin_panel_command, pattern="^admin_back_to_panel$"),
             ],
-            AWAITING_BROADCAST: [MessageHandler(filters.ALL & ~filters.COMMAND, handle_broadcast)],
-            AWAITING_SUBSCRIBE_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_subscribe_id)],
-            AWAITING_UNSUBSCRIBE_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_unsubscribe_id)],
-            AWAITING_CHANNEL_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_set_channel)],
+            AWAITING_BROADCAST: [
+                MessageHandler(filters.ALL & ~filters.COMMAND, handle_broadcast),
+                CallbackQueryHandler(admin_panel_command, pattern="^admin_back_to_panel$"),
+            ],
+            AWAITING_SUBSCRIBE_ID: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_subscribe_id),
+                CallbackQueryHandler(admin_panel_command, pattern="^admin_back_to_panel$"),
+            ],
+            AWAITING_UNSUBSCRIBE_ID: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_unsubscribe_id),
+                CallbackQueryHandler(admin_panel_command, pattern="^admin_back_to_panel$"),
+            ],
+            AWAITING_CHANNEL_ID: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_set_channel),
+                CallbackQueryHandler(admin_panel_command, pattern="^admin_back_to_panel$"),
+            ],
         },
-        fallbacks=[CommandHandler("cancel", admin_cancel)],
+        fallbacks=[
+            CommandHandler("admin", admin_panel_command), # للسماح بإعادة تشغيل اللوحة
+            CommandHandler("cancel", admin_cancel),
+            CommandHandler("start", start_command) # للسماح بالخروج من وضع الأدمن
+        ],
+        per_message=False, # مهم لجعل أزرار الرجوع تعمل بشكل صحيح
     )
     application.add_handler(admin_conv_handler)
 
