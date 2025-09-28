@@ -190,15 +190,17 @@ async def download_video(url: str) -> str | None:
         logging.error(f"فشل تحميل الفيديو: {e}")
         return None
 
-async def download_media(url: str, media_type: str) -> tuple[str | None, str | None]:
+async def download_media(url: str, media_type: str, format_id: str = None) -> tuple[str | None, str | None]:
     """
     يقوم بتحميل الفيديو أو الصوت من الرابط المحدد.
     يعيد مسار الملف المحمل ونوعه (video/audio) أو (None, None) في حالة الفشل.
     """
     if not os.path.exists('downloads'):
         os.makedirs('downloads')
-
-    opts = YDL_OPTS_VIDEO if media_type == 'video' else YDL_OPTS_AUDIO
+    
+    opts = YDL_OPTS_VIDEO.copy() if media_type == 'video' else YDL_OPTS_AUDIO.copy()
+    if format_id:
+        opts['format'] = format_id
 
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -293,52 +295,57 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with yt_dlp.YoutubeDL({'noplaylist': True}) as ydl:
             info = ydl.extract_info(url, download=False)
 
-        # البحث عن أفضل صيغة فيديو وأفضل صيغة صوت
-        video_format = None
-        audio_format = None
-        
-        # محاولة إيجاد أفضل فيديو مدمج مع صوت
-        for f in info.get('formats', []):
-            if f.get('vcodec') != 'none' and f.get('acodec') != 'none' and f.get('ext') == 'mp4':
-                video_format = f
-                break
-        
-        # إذا لم نجد، نحاول إيجاد أفضل فيديو وأفضل صوت منفصلين
-        if not video_format:
-            best_video = ydl.build_format_selector(YDL_OPTS_VIDEO['format'])(info)['formats'][0]
-            best_audio_for_video = ydl.build_format_selector(YDL_OPTS_VIDEO['format'])(info)['formats'][1]
-            video_size = best_video.get('filesize') or best_video.get('filesize_approx')
-            audio_for_video_size = best_audio_for_video.get('filesize') or best_audio_for_video.get('filesize_approx')
-            if video_size and audio_for_video_size:
-                 video_format = {'filesize': video_size + audio_for_video_size}
-            else:
-                 video_format = {'filesize': None} # حجم غير معروف
+        # --- منطق جديد لتجميع خيارات التحميل ---
+        keyboard = []
+        available_formats = {} # لتخزين أفضل صيغة لكل دقة
 
-        # البحث عن أفضل صيغة صوت منفصلة
-        for f in info.get('formats', []):
-             if f.get('acodec') != 'none' and f.get('vcodec') == 'none':
-                audio_format = f
-                break
+        # البحث عن أفضل صيغة صوت M4A
+        best_audio = next((f for f in sorted(info.get('formats', []), key=lambda x: x.get('filesize') or 0, reverse=True) 
+                           if f.get('vcodec') == 'none' and f.get('ext') == 'm4a'), None)
+        if best_audio:
+            size_str = format_bytes(best_audio.get('filesize') or best_audio.get('filesize_approx'))
+            keyboard.append([InlineKeyboardButton(f"🎵 صوت M4A ({size_str})", callback_data=f"download:audio:{best_audio['format_id']}:{update.message.message_id}")])
+            available_formats['audio'] = best_audio
 
-        video_size_str = format_bytes(video_format.get('filesize') or video_format.get('filesize_approx')) if video_format else "N/A"
-        audio_size_str = format_bytes(audio_format.get('filesize') or audio_format.get('filesize_approx')) if audio_format else "N/A"
+        # البحث عن صيغ الفيديو المختلفة
+        resolutions = ['1080', '720', '480', '360', '240']
+        for res in resolutions:
+            # البحث عن أفضل صيغة MP4 مدمجة (فيديو+صوت) لهذه الدقة
+            best_format = next((f for f in sorted(info.get('formats', []), key=lambda x: x.get('filesize') or 0, reverse=True)
+                                if f.get('height') == int(res) and f.get('ext') == 'mp4' and f.get('vcodec') != 'none' and f.get('acodec') != 'none'), None)
+            
+            # إذا لم نجد صيغة مدمجة، نبحث عن أفضل فيديو منفصل وندمجه مع أفضل صوت
+            if not best_format:
+                video_only = next((f for f in sorted(info.get('formats', []), key=lambda x: x.get('tbr') or 0, reverse=True)
+                                   if f.get('height') == int(res) and f.get('ext') == 'mp4' and f.get('vcodec') != 'none' and f.get('acodec') == 'none'), None)
+                if video_only:
+                    # أفضل صوت متاح للدمج
+                    audio_for_merge = next((f for f in sorted(info.get('formats', []), key=lambda x: x.get('tbr') or 0, reverse=True)
+                                            if f.get('acodec') != 'none' and f.get('vcodec') == 'none'), None)
+                    if audio_for_merge:
+                        video_size = video_only.get('filesize') or video_only.get('filesize_approx') or 0
+                        audio_size = audio_for_merge.get('filesize') or audio_for_merge.get('filesize_approx') or 0
+                        total_size = video_size + audio_size if video_size and audio_size else None
+                        best_format = video_only
+                        best_format['filesize_approx'] = total_size
+                        # سنقوم بدمج أفضل فيديو مع أفضل صوت
+                        best_format['format_id'] = f"{video_only['format_id']}+{audio_for_merge['format_id']}"
 
-        # استخراج معرف الفيديو لاستخدامه في callback_data لتجنب تجاوز الحد الأقصى (64 بايت)
-        # الحل الأمثل: تخزين الرابط الأصلي في chat_data باستخدام message_id كـ key
-        # هذا يحل مشكلة طول الرابط في callback_data
+            if best_format:
+                size_str = format_bytes(best_format.get('filesize') or best_format.get('filesize_approx'))
+                keyboard.append([InlineKeyboardButton(f"🎬 فيديو {res}p ({size_str})", callback_data=f"download:video:{best_format['format_id']}:{update.message.message_id}")])
+                available_formats[res] = best_format
+
+        if not keyboard:
+            await status_message.edit_text("❌ عذراً، لم يتم العثور على صيغ تحميل مدعومة لهذا الرابط.")
+            return
+
+        # تخزين معلومات الصيغ المتاحة في chat_data
         original_message_id = update.message.message_id
-        context.chat_data[original_message_id] = {
-            'url': url,
-            'video_size': video_format.get('filesize') or video_format.get('filesize_approx'),
-            'audio_size': audio_format.get('filesize') or audio_format.get('filesize_approx')
-        }
+        context.chat_data[original_message_id] = {'url': url, 'formats': available_formats}
 
-        keyboard = [
-            [InlineKeyboardButton(f"🎬 فيديو ({video_size_str})", callback_data=f"download:video:{original_message_id}")],
-            [InlineKeyboardButton(f"🎵 صوت ({audio_size_str})", callback_data=f"download:audio:{original_message_id}")],
-            # زر الإلغاء
-            [InlineKeyboardButton("❌ إلغاء", callback_data=f"cancel:{original_message_id}")],
-        ]
+        # إضافة زر الإلغاء
+        keyboard.append([InlineKeyboardButton("❌ إلغاء", callback_data=f"cancel:{original_message_id}")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         title = info.get('title', 'فيديو')
@@ -358,8 +365,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     data = query.data
-    # استعادة البيانات: action, media_type, original_message_id
-    action, media_type, original_message_id_str = data.split(":", 2)
+    # استعادة البيانات: action, media_type, format_id, original_message_id
+    parts = data.split(":", 3)
+    action, media_type, format_id, original_message_id_str = parts if len(parts) == 4 else (parts[0], None, None, parts[1])
     original_message_id = int(original_message_id_str)
 
     if action == "cancel":
@@ -369,18 +377,24 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if action == "download":
-        # استرجاع بيانات الرابط من chat_data باستخدام message_id
+        # استرجاع بيانات الرابط والصيغ من chat_data
         media_info = context.chat_data.get(original_message_id)
         if not media_info:
             await query.edit_message_text(text="❌ حدث خطأ. ربما تكون هذه الرسالة قديمة جداً. الرجاء إرسال الرابط مرة أخرى.")
             return
 
-        download_url = media_info['url']
+        download_url = media_info.get('url')
         user_id = query.from_user.id
         is_premium = is_premium_user(user_id)
 
         # التحقق من حجم الملف للمستخدمين العاديين
-        file_size = media_info.get('video_size') if media_type == 'video' else media_info.get('audio_size')
+        file_size = None
+        selected_format_key = 'audio' if media_type == 'audio' else format_id.split('+')[0] # للبحث في القاموس
+        for key, fmt in media_info.get('formats', {}).items():
+            if fmt['format_id'] == format_id or fmt['format_id'] == selected_format_key:
+                file_size = fmt.get('filesize') or fmt.get('filesize_approx')
+                break
+
         if not is_premium and file_size and file_size > FREE_TIER_LIMIT_BYTES:
             limit_mb = FREE_TIER_LIMIT_BYTES / (1024*1024)
             await query.edit_message_text(
@@ -392,7 +406,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.edit_message_text(text=f"⏳ جارٍ تحميل الـ {media_type}، يرجى الانتظار...")
         
-        filepath, downloaded_type = await download_media(download_url, media_type)
+        filepath, downloaded_type = await download_media(download_url, media_type, format_id)
 
         if not filepath:
             await query.edit_message_text(text=f"❌ فشل تحميل الـ {media_type}. حاول مجدداً أو جرب رابطاً آخر.")
@@ -581,7 +595,7 @@ def main():
 
     # معالج ضغطات الأزرار
     # استخدام نمط مختلف لكل نوع من الأزرار لتنظيم الكود
-    application.add_handler(CallbackQueryHandler(button_callback, pattern="^download:.*$"))
+    application.add_handler(CallbackQueryHandler(button_callback, pattern=r"^(download|cancel):.*$"))
     application.add_handler(CallbackQueryHandler(button_callback, pattern="^cancel:.*$"))
     application.add_handler(CallbackQueryHandler(admin_button_callback, pattern="^admin:.*$"))
 
@@ -591,3 +605,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
