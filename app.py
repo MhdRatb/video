@@ -116,7 +116,7 @@ YDL_OPTS_VIDEO = {
     'max_filesize': 2000 * 1024 * 1024,
     'postprocessors': [{
         'key': 'FFmpegRemuxer',
-        'preferedformat': 'mp4',
+        'preferredformat': 'mp4',
     }],
 }
 
@@ -245,8 +245,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     add_user(user.id)
     await update.message.reply_html(
         f"أهلاً بك يا {user.mention_html()}!\n\n"
-        "أنا بوت تحميل الفيديوهات. أرسل لي أي رابط فيديو وسأقوم بتحميله وإرساله لك.\n\n"
-        "للحصول على المساعدة، استخدم الأمر /help."
+        "أنا بوت تحميل الفيديوهات. أرسل لي أي رابط فيديو وسأقوم بتحميله وإرساله لك."
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
