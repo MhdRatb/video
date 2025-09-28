@@ -117,10 +117,11 @@ YDL_OPTS_VIDEO = {
     'noplaylist': True,
     'max_filesize': 2000 * 1024 * 1024,
     'postprocessors': [{
-        # استخدام FFmpegVideoConvertor لأنه أكثر شمولاً من Remuxer
-        # يمكنه التعامل مع التحويل وإعادة الدمج.
-        'key': 'FFmpegVideoConvertor',
-        'toformat': 'mp4',  # الخيار الصحيح لهذا المعالج هو 'toformat'
+        # استخدام FFmpegRemuxer لضمان أن الحاوية النهائية هي mp4.
+        # هذا المعالج يقوم فقط بدمج الصيغ دون إعادة ترميز، وهو أسرع.
+        # يتم تشغيله فقط إذا لم يكن الملف الناتج mp4 بالفعل.
+        'key': 'FFmpegRemuxer',
+        'when': 'after_move',
     }],
 }
 
