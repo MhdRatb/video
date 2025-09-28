@@ -325,7 +325,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if audio_for_merge:
                         video_size = video_only.get('filesize') or video_only.get('filesize_approx')
                         audio_size = audio_for_merge.get('filesize') or audio_for_merge.get('filesize_approx')
-                        total_size = video_size + audio_size if video_size and audio_size else None
+                        total_size = (video_size or 0) + (audio_size or 0)
                         best_format = video_only
                         best_format['filesize_approx'] = total_size
                         # سنقوم بدمج أفضل فيديو مع أفضل صوت
