@@ -212,6 +212,20 @@ async def download_media(url: str, media_type: str, format_id: str = None) -> tu
     except Exception as e:
         logging.error(f"فشل تحميل {media_type}: {e}")
         return None, None
+
+def get_estimated_size(fmt: dict, duration: float | None) -> float | None:
+    """
+    يقدر حجم الصيغة بالبايت.
+    يعتمد على filesize، ثم filesize_approx، ثم يحسبه من tbr و duration.
+    """
+    if not fmt:
+        return None
+    
+    size = fmt.get('filesize') or fmt.get('filesize_approx')
+    if not size and duration and fmt.get('tbr'):
+        size = (fmt.get('tbr') * 1024 / 8) * duration
+    
+    return size if size and size > 0 else None
 # ==============================================================================
 # ٤. منطق البوت الرئيسي (ملف bot.py سابقاً)
 # ==============================================================================
@@ -309,16 +323,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # جلب المعلومات فقط بدون تحميل
         with yt_dlp.YoutubeDL({'noplaylist': True}) as ydl:
             info = ydl.extract_info(url, download=False)
+        duration = info.get('duration')
 
         # --- منطق جديد لتجميع خيارات التحميل ---
         keyboard = []
         available_formats = {} # لتخزين أفضل صيغة لكل دقة
-
         # البحث عن أفضل صيغة صوت M4A
         best_audio = next((f for f in sorted(info.get('formats', []), key=lambda x: x.get('filesize') or 0, reverse=True) 
                            if f.get('vcodec') == 'none' and f.get('ext') == 'm4a'), None)
         if best_audio:
-            size_str = format_bytes(best_audio.get('filesize') or best_audio.get('filesize_approx'))
+            best_audio['filesize_approx'] = get_estimated_size(best_audio, duration)
+            size_str = format_bytes(best_audio['filesize_approx'])
             keyboard.append([InlineKeyboardButton(f"🎵 صوت M4A ({size_str})", callback_data=f"download:audio:audio:{update.message.message_id}")])
             available_formats['audio'] = best_audio
 
@@ -348,15 +363,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # إذا كانت الصيغة فيديو فقط، قم بدمجها مع أفضل صوت
             if best_format.get('acodec') == 'none' and best_audio:
-                best_format['format_id'] = f"{best_format['format_id']}+{best_audio['format_id']}"
-                # --- منطق جديد ومحسّن لتقدير الحجم ---
-                duration = info.get('duration') or 0
-                video_tbr = best_format.get('tbr') or 0
-                audio_tbr = best_audio.get('tbr') or 0
-                estimated_size = (video_tbr + audio_tbr) * 1024 / 8 * duration
-                best_format['filesize_approx'] = estimated_size if estimated_size > 0 else None
+                video_size = get_estimated_size(best_format, duration) or 0
+                audio_size = get_estimated_size(best_audio, duration) or 0
+                total_size = video_size + audio_size
+                best_format['filesize_approx'] = total_size if total_size > 0 else None
+                best_format['format_id'] = f"{best_format['format_id']}+{best_audio['format_id']}" # يتم تحديثه بعد حساب الحجم
+            else: # إذا كانت الصيغة مدمجة بالفعل
+                best_format['filesize_approx'] = get_estimated_size(best_format, duration)
 
-            size_str = format_bytes(best_format.get('filesize') or best_format.get('filesize_approx'))
+            size_str = format_bytes(best_format['filesize_approx'])
             keyboard.append([InlineKeyboardButton(f"🎬 فيديو {height}p ({size_str})", callback_data=f"download:video:{height}:{update.message.message_id}")])
             available_formats[height] = best_format
 
@@ -694,4 +709,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
