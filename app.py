@@ -28,6 +28,9 @@ DATABASE_NAME = os.path.join(DATABASE_PATH, "bot_data.db") if DATABASE_PATH else
 if not BOT_TOKEN:
     raise ValueError("لم يتم العثور على متغير البيئة BOT_TOKEN. يرجى إضافته.")
 
+# الحد الأقصى للرفع عبر واجهة برمجة التطبيقات القياسية لتليجرام (50 ميجابايت)
+BOT_API_UPLOAD_LIMIT = 50 * 1024 * 1024
+
 # ==============================================================================
 # ٢. دوال قاعدة البيانات (بديل لـ database.py)
 # ==============================================================================
@@ -300,9 +303,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                            if f.get('vcodec') == 'none' and f.get('ext') == 'm4a'), None)
         if best_audio:
             best_audio['filesize_approx'] = get_estimated_size(best_audio, duration)
-            size_str = format_bytes(best_audio['filesize_approx'])
-            keyboard.append([InlineKeyboardButton(f"🎵 صوت M4A ({size_str})", callback_data=f"download:audio:audio:{update.message.message_id}")])
-            available_formats['audio'] = best_audio
+            # التحقق من أن حجم الملف لا يتجاوز حد الرفع
+            if not best_audio['filesize_approx'] or best_audio['filesize_approx'] <= BOT_API_UPLOAD_LIMIT:
+                size_str = format_bytes(best_audio['filesize_approx'])
+                keyboard.append([InlineKeyboardButton(f"🎵 صوت M4A ({size_str})", callback_data=f"download:audio:audio:{update.message.message_id}")])
+                available_formats['audio'] = best_audio
 
         # --- منطق جديد ومرن للبحث عن صيغ الفيديو ---
         video_formats_by_height = {}
@@ -338,9 +343,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else: # إذا كانت الصيغة مدمجة بالفعل
                 best_format['filesize_approx'] = get_estimated_size(best_format, duration)
 
-            size_str = format_bytes(best_format['filesize_approx'])
-            keyboard.append([InlineKeyboardButton(f"🎬 فيديو {height}p ({size_str})", callback_data=f"download:video:{height}:{update.message.message_id}")])
-            available_formats[height] = best_format
+            # التحقق من أن حجم الملف لا يتجاوز حد الرفع
+            if not best_format['filesize_approx'] or best_format['filesize_approx'] <= BOT_API_UPLOAD_LIMIT:
+                size_str = format_bytes(best_format['filesize_approx'])
+                keyboard.append([InlineKeyboardButton(f"🎬 فيديو {height}p ({size_str})", callback_data=f"download:video:{height}:{update.message.message_id}")])
+                available_formats[height] = best_format
 
         if not keyboard:
             await status_message.edit_text("❌ عذراً، لم يتم العثور على صيغ تحميل مدعومة لهذا الرابط.")
