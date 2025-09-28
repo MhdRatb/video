@@ -120,9 +120,10 @@ YDL_OPTS_VIDEO = {
         # استخدام FFmpegRemuxer لضمان أن الحاوية النهائية هي mp4.
         # هذا المعالج يقوم فقط بدمج الصيغ دون إعادة ترميز، وهو أسرع.
         # يتم تشغيله فقط إذا لم يكن الملف الناتج mp4 بالفعل.
-        'key': 'FFmpegVideoRemuxer',
-        'preferredformat': 'mp4', # تحديد الصيغة النهائية المطلوبة
-        'when': 'after_move', # تشغيل المعالج بعد اكتمال التحميل
+        # استخدام FFmpegVideoConvertor لأنه أكثر شمولاً.
+        # يمكنه التعامل مع التحويل (re-encoding) والدمج (remuxing).
+        'key': 'FFmpegVideoConvertor',
+        'toformat': 'mp4',  # الخيار الصحيح لهذا المعالج هو 'toformat'
     }],
 }
 
