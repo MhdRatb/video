@@ -347,11 +347,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if best_format.get('acodec') == 'none' and best_audio:
                 best_format['format_id'] = f"{best_format['format_id']}+{best_audio['format_id']}"
                 # --- منطق جديد ومحسّن لتقدير الحجم ---
-                duration = info.get('duration')
-                video_size = best_format.get('filesize') or best_format.get('filesize_approx') or (best_format.get('tbr') * 1024 / 8 * duration if best_format.get('tbr') and duration else 0)
-                audio_size = best_audio.get('filesize') or best_audio.get('filesize_approx') or (best_audio.get('tbr') * 1024 / 8 * duration if best_audio.get('tbr') and duration else 0)
-                total_size = (video_size or 0) + (audio_size or 0)
-                best_format['filesize_approx'] = total_size if total_size > 0 else None
+                duration = info.get('duration') or 0
+                video_tbr = best_format.get('tbr') or 0
+                audio_tbr = best_audio.get('tbr') or 0
+                estimated_size = (video_tbr + audio_tbr) * 1024 / 8 * duration
+                best_format['filesize_approx'] = estimated_size if estimated_size > 0 else None
 
             size_str = format_bytes(best_format.get('filesize') or best_format.get('filesize_approx'))
             keyboard.append([InlineKeyboardButton(f"🎬 فيديو {height}p ({size_str})", callback_data=f"download:video:{height}:{update.message.message_id}")])
