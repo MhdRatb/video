@@ -116,15 +116,14 @@ YDL_OPTS_VIDEO = {
     'outtmpl': 'downloads/%(id)s.%(ext)s',
     'noplaylist': True,
     'max_filesize': 2000 * 1024 * 1024,
-    'postprocessors': [{
-        # استخدام FFmpegRemuxer لضمان أن الحاوية النهائية هي mp4.
-        # هذا المعالج يقوم فقط بدمج الصيغ دون إعادة ترميز، وهو أسرع.
-        # يتم تشغيله فقط إذا لم يكن الملف الناتج mp4 بالفعل.
-        # استخدام FFmpegVideoConvertor لأنه أكثر شمولاً.
-        # يمكنه التعامل مع التحويل (re-encoding) والدمج (remuxing).
-        'key': 'FFmpegVideoConvertor',
-        'toformat': 'mp4',  # الخيار الصحيح لهذا المعالج هو 'toformat'
-    }],
+    # سلسلة معالجات لاحقة مرنة
+    'postprocessors': [
+        # 1. الدمج أولاً (أسرع): يقوم بدمج الفيديو والصوت في حاوية mp4 إذا كانت الترميزات متوافقة
+        {'key': 'FFmpegVideoRemuxer',
+         'preferredformat': 'mp4'},
+        {'key': 'FFmpegVideoConvertor',
+         'toformat': 'mp4'},
+    ],
 }
 
 YDL_OPTS_AUDIO = {
