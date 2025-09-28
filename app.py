@@ -28,6 +28,9 @@ DATABASE_NAME = os.path.join(DATABASE_PATH, "bot_data.db") if DATABASE_PATH else
 if not BOT_TOKEN:
     raise ValueError("لم يتم العثور على متغير البيئة BOT_TOKEN. يرجى إضافته.")
 
+# حد التحميل للمستخدمين العاديين (100 ميجابايت)
+FREE_TIER_LIMIT_BYTES = 100 * 1024 * 1024
+
 # ==============================================================================
 # ٢. دوال قاعدة البيانات (بديل لـ database.py)
 # ==============================================================================
@@ -40,8 +43,9 @@ def init_db():
         cursor = conn.cursor()
         # جدول لتخزين المستخدمين
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY
+            CREATE TABLE IF NOT EXISTS users ( 
+                user_id INTEGER PRIMARY KEY,
+                is_subscriber INTEGER DEFAULT 0
             )
         ''')
         # جدول لتخزين الإعدادات (مثل قناة الاشتراك الإجباري)
@@ -52,6 +56,21 @@ def init_db():
             )
         ''')
         conn.commit()
+        # التأكد من وجود عمود is_subscriber في الجداول القديمة
+        try:
+            cursor.execute("SELECT is_subscriber FROM users LIMIT 1")
+        except sqlite3.OperationalError:
+            cursor.execute("ALTER TABLE users ADD COLUMN is_subscriber INTEGER DEFAULT 0")
+            conn.commit()
+            logger.info("تم تحديث جدول المستخدمين بنجاح.")
+
+def is_premium_user(user_id: int) -> bool:
+    """يتحقق مما إذا كان المستخدم مشتركًا."""
+    with sqlite3.connect(DATABASE_NAME) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT is_subscriber FROM users WHERE user_id = ?", (user_id,))
+        result = cursor.fetchone()
+        return result and result[0] == 1
 
 def add_user(user_id: int):
     """
@@ -87,6 +106,22 @@ def set_setting(key: str, value: str):
     with sqlite3.connect(DATABASE_NAME) as conn:
         cursor = conn.cursor()
         cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
+        conn.commit()
+
+def subscribe_user(user_id: int):
+    """يجعل المستخدم مشتركًا."""
+    with sqlite3.connect(DATABASE_NAME) as conn:
+        cursor = conn.cursor()
+        # التأكد من وجود المستخدم أولاً
+        cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+        cursor.execute("UPDATE users SET is_subscriber = 1 WHERE user_id = ?", (user_id,))
+        conn.commit()
+
+def unsubscribe_user(user_id: int):
+    """يلغي اشتراك المستخدم."""
+    with sqlite3.connect(DATABASE_NAME) as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET is_subscriber = 0 WHERE user_id = ?", (user_id,))
         conn.commit()
 
 def get_setting(key: str) -> str | None:
@@ -292,11 +327,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # الحل الأمثل: تخزين الرابط الأصلي في chat_data باستخدام message_id كـ key
         # هذا يحل مشكلة طول الرابط في callback_data
         original_message_id = update.message.message_id
-        context.chat_data[original_message_id] = url
+        context.chat_data[original_message_id] = {
+            'url': url,
+            'video_size': video_format.get('filesize') or video_format.get('filesize_approx'),
+            'audio_size': audio_format.get('filesize') or audio_format.get('filesize_approx')
+        }
 
         keyboard = [
             [InlineKeyboardButton(f"🎬 فيديو ({video_size_str})", callback_data=f"download:video:{original_message_id}")],
             [InlineKeyboardButton(f"🎵 صوت ({audio_size_str})", callback_data=f"download:audio:{original_message_id}")],
+            # زر الإلغاء
+            [InlineKeyboardButton("❌ إلغاء", callback_data=f"cancel:{original_message_id}")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -321,11 +362,32 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action, media_type, original_message_id_str = data.split(":", 2)
     original_message_id = int(original_message_id_str)
 
+    if action == "cancel":
+        await query.message.delete()
+        # تنظيف chat_data
+        context.chat_data.pop(original_message_id, None)
+        return
+
     if action == "download":
-        # استرجاع الرابط الأصلي من chat_data باستخدام message_id
-        download_url = context.chat_data.get(original_message_id)
-        if not download_url:
+        # استرجاع بيانات الرابط من chat_data باستخدام message_id
+        media_info = context.chat_data.get(original_message_id)
+        if not media_info:
             await query.edit_message_text(text="❌ حدث خطأ. ربما تكون هذه الرسالة قديمة جداً. الرجاء إرسال الرابط مرة أخرى.")
+            return
+
+        download_url = media_info['url']
+        user_id = query.from_user.id
+        is_premium = is_premium_user(user_id)
+
+        # التحقق من حجم الملف للمستخدمين العاديين
+        file_size = media_info.get('video_size') if media_type == 'video' else media_info.get('audio_size')
+        if not is_premium and file_size and file_size > FREE_TIER_LIMIT_BYTES:
+            limit_mb = FREE_TIER_LIMIT_BYTES / (1024*1024)
+            await query.edit_message_text(
+                text=f"🚫 عذراً، حجم الملف يتجاوز الحد المسموح به للمستخدمين العاديين ({limit_mb:.0f} MB).\n\n"
+                     "لتحميل ملفات بأحجام غير محدودة، يرجى الترقية إلى الاشتراك المدفوع.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ إغلاق", callback_data=f"cancel:{original_message_id}")]]),
+            )
             return
 
         await query.edit_message_text(text=f"⏳ جارٍ تحميل الـ {media_type}، يرجى الانتظار...")
@@ -425,6 +487,68 @@ async def del_channel_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     set_setting('force_channel', '')
     await update.message.reply_text("✅ تم حذف قناة الاشتراك الإجباري.")
 
+async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+    if not context.args:
+        await update.message.reply_text("الاستخدام: /subscribe <user_id>")
+        return
+    
+    try:
+        user_id_to_subscribe = int(context.args[0])
+        subscribe_user(user_id_to_subscribe)
+        await update.message.reply_text(f"✅ تم تفعيل اشتراك المستخدم: {user_id_to_subscribe}")
+    except (ValueError, IndexError):
+        await update.message.reply_text("الرجاء إدخال معرف مستخدم صالح.")
+
+async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+    if not context.args:
+        await update.message.reply_text("الاستخدام: /unsubscribe <user_id>")
+        return
+    
+    try:
+        user_id_to_unsubscribe = int(context.args[0])
+        unsubscribe_user(user_id_to_unsubscribe)
+        await update.message.reply_text(f"✅ تم إلغاء اشتراك المستخدم: {user_id_to_unsubscribe}")
+    except (ValueError, IndexError):
+        await update.message.reply_text("الرجاء إدخال معرف مستخدم صالح.")
+
+async def admin_panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+
+    keyboard = [
+        [InlineKeyboardButton("📊 الإحصائيات", callback_data="admin:stats")],
+        [InlineKeyboardButton("📢 إذاعة (بالرد)", callback_data="admin:broadcast_info")],
+        [InlineKeyboardButton("➕ تفعيل اشتراك", callback_data="admin:subscribe_info")],
+        [InlineKeyboardButton("➖ إلغاء اشتراك", callback_data="admin:unsubscribe_info")],
+        [InlineKeyboardButton("📺 ضبط القناة", callback_data="admin:setchannel_info")],
+        [InlineKeyboardButton("🗑️ حذف القناة", callback_data="admin:delchannel")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("⚙️ <b>لوحة تحكم الأدمن</b>", reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+
+async def admin_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    _, command = query.data.split(":", 1)
+
+    info_texts = {
+        "broadcast_info": "لعمل إذاعة، قم بالرد على الرسالة المراد إرسالها ثم اكتب الأمر /broadcast.",
+        "subscribe_info": "لتفعيل اشتراك، استخدم الأمر: /subscribe <user_id>",
+        "unsubscribe_info": "لإلغاء اشتراك، استخدم الأمر: /unsubscribe <user_id>",
+        "setchannel_info": "لضبط قناة الاشتراك الإجباري، استخدم الأمر: /setchannel @username",
+    }
+
+    if command == "stats":
+        await stats_command(query, context)
+    elif command == "delchannel":
+        await del_channel_command(query, context)
+    elif command in info_texts:
+        await query.edit_message_text(info_texts[command])
+
 # ==============================================================================
 # ٥. نقطة انطلاق البوت
 # ==============================================================================
@@ -448,12 +572,18 @@ def main():
     application.add_handler(CommandHandler("broadcast", broadcast_command))
     application.add_handler(CommandHandler("setchannel", set_channel_command))
     application.add_handler(CommandHandler("delchannel", del_channel_command))
+    application.add_handler(CommandHandler("subscribe", subscribe_command))
+    application.add_handler(CommandHandler("unsubscribe", unsubscribe_command))
+    application.add_handler(CommandHandler("admin", admin_panel_command))
 
     # معالج الرسائل النصية التي لا تبدأ بأمر
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # معالج ضغطات الأزرار
-    application.add_handler(CallbackQueryHandler(button_callback))
+    # استخدام نمط مختلف لكل نوع من الأزرار لتنظيم الكود
+    application.add_handler(CallbackQueryHandler(button_callback, pattern="^download:.*$"))
+    application.add_handler(CallbackQueryHandler(button_callback, pattern="^cancel:.*$"))
+    application.add_handler(CallbackQueryHandler(admin_button_callback, pattern="^admin:.*$"))
 
     # بدء تشغيل البوت
     logger.info("البوت قيد التشغيل...")
