@@ -316,7 +316,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                            if f.get('vcodec') == 'none' and f.get('ext') == 'm4a'), None)
         if best_audio:
             size_str = format_bytes(best_audio.get('filesize') or best_audio.get('filesize_approx'))
-            keyboard.append([InlineKeyboardButton(f"🎵 صوت M4A ({size_str})", callback_data=f"download:audio:{best_audio['format_id']}:{update.message.message_id}")])
+            keyboard.append([InlineKeyboardButton(f"🎵 صوت M4A ({size_str})", callback_data=f"download:audio:audio:{update.message.message_id}")])
             available_formats['audio'] = best_audio
 
         # --- منطق جديد ومرن للبحث عن صيغ الفيديو ---
@@ -351,7 +351,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 best_format['filesize_approx'] = video_size + audio_size
 
             size_str = format_bytes(best_format.get('filesize') or best_format.get('filesize_approx'))
-            keyboard.append([InlineKeyboardButton(f"🎬 فيديو {height}p ({size_str})", callback_data=f"download:video:{best_format['format_id']}:{update.message.message_id}")])
+            keyboard.append([InlineKeyboardButton(f"🎬 فيديو {height}p ({size_str})", callback_data=f"download:video:{height}:{update.message.message_id}")])
             available_formats[height] = best_format
 
         if not keyboard:
@@ -384,8 +384,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = query.data
     # استعادة البيانات: action, media_type, format_id, original_message_id
-    parts = data.split(":", 3)
-    action, media_type, format_id, original_message_id_str = parts if len(parts) == 4 else (parts[0], None, None, parts[1])
+    parts = data.split(":", 3) # download:video:720:12345
+    action, media_type, format_key, original_message_id_str = parts if len(parts) == 4 else (parts[0], None, None, parts[1])
     original_message_id = int(original_message_id_str)
 
     if action == "cancel":
@@ -405,14 +405,17 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = query.from_user.id
         is_premium = is_premium_user(user_id)
 
-        # التحقق من حجم الملف للمستخدمين العاديين
-        file_size = None
-        selected_format_key = 'audio' if media_type == 'audio' else format_id.split('+')[0] # للبحث في القاموس
-        for key, fmt in media_info.get('formats', {}).items():
-            if fmt['format_id'] == format_id or fmt['format_id'] == selected_format_key:
-                file_size = fmt.get('filesize') or fmt.get('filesize_approx')
-                break
+        # استرجاع الصيغة المطلوبة من chat_data باستخدام format_key
+        try:
+            # format_key هو 'audio' أو رقم الدقة مثل '720'
+            selected_format = media_info['formats'][int(format_key) if format_key.isdigit() else format_key]
+            format_id = selected_format['format_id']
+            file_size = selected_format.get('filesize') or selected_format.get('filesize_approx')
+        except (KeyError, TypeError):
+            await query.edit_message_text(text="❌ حدث خطأ أثناء استرجاع معلومات الصيغة. قد تكون الرسالة قديمة جداً.")
+            return
 
+        # التحقق من حجم الملف للمستخدمين العاديين
         if not is_premium and file_size and file_size > FREE_TIER_LIMIT_BYTES:
             limit_mb = FREE_TIER_LIMIT_BYTES / (1024*1024)
             await query.edit_message_text(
