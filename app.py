@@ -1,10 +1,11 @@
 # /path/to/your/project/video_bot.py
 
+import asyncio
 import logging
 import os
 import sqlite3
 import yt_dlp
-from telegram import Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram import Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Message
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler, ConversationHandler
 from telegram.constants import ParseMode
 from telegram.error import TelegramError
@@ -116,7 +117,7 @@ YDL_OPTS_VIDEO = {
     'max_filesize': 2000 * 1024 * 1024,
     'postprocessors': [{
         'key': 'FFmpegRemuxer',
-        'preferredformat': 'mp4',
+        'preferredformat': 'mp4', # التأكد من صحة هذا الخيار
     }],
 }
 
@@ -129,7 +130,7 @@ YDL_OPTS_AUDIO = {
     'postprocessors': [{
         'key': 'FFmpegExtractAudio',
         'preferredcodec': 'm4a',
-    }],
+    }]
 }
 
 def format_bytes(size):
@@ -144,46 +145,64 @@ def format_bytes(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}"
 
-async def download_video(url: str) -> str | None:
-    """
-    يقوم بتحميل الفيديو من الرابط المحدد باستخدام yt-dlp.
-    يعيد مسار الملف المحمل أو None في حالة الفشل.
-    """
-    if not os.path.exists('downloads'):
-        os.makedirs('downloads')
+def generate_progress_bar(percentage: float) -> str:
+    """ينشئ شريط تقدم نصي."""
+    filled_length = int(10 * percentage / 100)
+    bar = '█' * filled_length + '░' * (10 - filled_length)
+    return f"[{bar}] {percentage:.1f}%"
 
-    try:
-        with yt_dlp.YoutubeDL(YDL_OPTS_VIDEO) as ydl:
-            logging.info(f"بدء تحميل الفيديو من: {url}")
-            info = ydl.extract_info(url, download=True)
-            filepath = ydl.prepare_filename(info)
-            logging.info(f"اكتمل التحميل: {filepath}")
-            return filepath
-    except Exception as e:
-        logging.error(f"فشل تحميل الفيديو: {e}")
-        return None
 
-async def download_media(url: str, media_type: str, format_id: str = None) -> tuple[str | None, str | None]:
+async def download_media(
+    url: str, 
+    media_type: str, 
+    format_id: str, 
+    status_message: Message, 
+    context: ContextTypes.DEFAULT_TYPE
+) -> tuple[str | None, str | None]:
     """
     يقوم بتحميل الفيديو أو الصوت من الرابط المحدد.
     يعيد مسار الملف المحمل ونوعه (video/audio) أو (None, None) في حالة الفشل.
     """
+    last_update_time = 0
+
+    async def progress_hook(d):
+        nonlocal last_update_time
+        if d['status'] == 'downloading':
+            current_time = asyncio.get_event_loop().time()
+            # تحديث كل ثانيتين لتجنب أخطاء API Flood
+            if current_time - last_update_time > 2:
+                try:
+                    total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate')
+                    if total_bytes:
+                        downloaded_bytes = d.get('downloaded_bytes', 0)
+                        percentage = (downloaded_bytes / total_bytes) * 100
+                        progress_bar = generate_progress_bar(percentage)
+                        await status_message.edit_text(
+                            f"⏳ جارٍ التحميل...\n{progress_bar}"
+                        )
+                        last_update_time = current_time
+                except TelegramError as e:
+                    # تجاهل أخطاء "Message is not modified"
+                    if "Message is not modified" not in str(e):
+                        logger.warning(f"خطأ أثناء تحديث شريط التقدم: {e}")
+
     if not os.path.exists('downloads'):
         os.makedirs('downloads')
     
     opts = YDL_OPTS_VIDEO.copy() if media_type == 'video' else YDL_OPTS_AUDIO.copy()
     if format_id:
         opts['format'] = format_id
+    
+    opts['progress_hooks'] = [progress_hook]
 
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
-            logging.info(f"بدء تحميل {media_type} من: {url}")
             info = ydl.extract_info(url, download=True)
             filepath = ydl.prepare_filename(info)
             logging.info(f"اكتمل التحميل: {filepath}")
             return filepath, media_type
     except Exception as e:
-        logging.error(f"فشل تحميل {media_type}: {e}")
+        logging.error(f"فشل تحميل {media_type}: {e}", exc_info=True)
         return None, None
 
 def get_estimated_size(fmt: dict, duration: float | None) -> float | None:
@@ -199,6 +218,41 @@ def get_estimated_size(fmt: dict, duration: float | None) -> float | None:
         size = (fmt.get('tbr') * 1024 / 8) * duration
     
     return size if size and size > 0 else None
+
+class UploadProgress:
+    def __init__(self, file_path: str, status_message: Message):
+        self._file_path = file_path
+        self._status_message = status_message
+        self._total_size = os.path.getsize(file_path)
+        self._uploaded_size = 0
+        self._last_update_time = 0
+        self._last_percentage = -1
+
+    async def __call__(self, current: int, total: int):
+        """يتم استدعاؤها من قبل مكتبة تليجرام أثناء الرفع."""
+        percentage = (current / total) * 100
+        current_time = asyncio.get_event_loop().time()
+
+        # تحديث كل ثانيتين أو إذا زادت النسبة 5%
+        if current_time - self._last_update_time > 2 or percentage - self._last_percentage >= 5:
+            try:
+                progress_bar = generate_progress_bar(percentage)
+                await self._status_message.edit_text(
+                    f"⬆️ جارٍ الرفع...\n{progress_bar}"
+                )
+                self._last_update_time = current_time
+                self._last_percentage = percentage
+            except TelegramError as e:
+                if "Message is not modified" not in str(e):
+                    logger.warning(f"خطأ أثناء تحديث شريط تقدم الرفع: {e}")
+
+
+
+
+
+
+
+
 # ==============================================================================
 # ٤. منطق البوت الرئيسي (ملف bot.py سابقاً)
 # ==============================================================================
@@ -627,4 +681,11 @@ def main():
     application.run_polling()
 
 if __name__ == "__main__":
+    # --- إعداد ملف الكوكيز ---
+    # يقرأ بيانات الكوكيز من متغيرات البيئة وينشئ ملفًا مؤقتًا ليستخدمه yt-dlp
+    instagram_cookie_data = os.getenv("INSTAGRAM_COOKIES")
+    if instagram_cookie_data:
+        with open("instagram_cookies.txt", "w") as f:
+            f.write(instagram_cookie_data)
+        logger.info("تم إنشاء ملف كوكيز انستغرام بنجاح.")
     main()
