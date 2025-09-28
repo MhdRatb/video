@@ -110,26 +110,28 @@ def get_setting(key: str) -> str | None:
 # إعدادات yt-dlp لتحميل أفضل صيغة فيديو وصوت ودمجهما
 YDL_OPTS_VIDEO = {
     'format': 'bestvideo+bestaudio/best',
-    'outtmpl': 'downloads/%(title)s-%(id)s.%(ext)s',
+    'outtmpl': 'downloads/%(title).100s-%(id)s.%(ext)s',
     'noplaylist': True,
     'merge_output_format': 'mp4',
     'postprocessors': [{
         'key': 'FFmpegVideoConvertor',
         'preferedformat': 'mp4',
     }],
-    'http_chunk_size': 10485760,  # 10MB chunks for better progress
+    'restrictfilenames': True,
+    'nooverwrites': True,
 }
 
 YDL_OPTS_AUDIO = {
     'format': 'bestaudio/best',
-    'outtmpl': 'downloads/%(title)s-%(id)s.%(ext)s',
+    'outtmpl': 'downloads/%(title).100s-%(id)s.%(ext)s',
     'noplaylist': True,
     'postprocessors': [{
         'key': 'FFmpegExtractAudio',
         'preferredcodec': 'm4a',
         'preferredquality': '192',
     }],
-    'http_chunk_size': 10485760,
+    'restrictfilenames': True,
+    'nooverwrites': True,
 }
 
 def format_bytes(size):
