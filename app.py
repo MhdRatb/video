@@ -119,6 +119,8 @@ YDL_OPTS_VIDEO = {
     }],
     'restrictfilenames': True,
     'nooverwrites': True,
+    'noprogress': True,  # تعطيل progress الداخلي
+    'quiet': True,       # تقليل الإخراج
 }
 
 YDL_OPTS_AUDIO = {
@@ -132,6 +134,8 @@ YDL_OPTS_AUDIO = {
     }],
     'restrictfilenames': True,
     'nooverwrites': True,
+    'noprogress': True,  # تعطيل progress الداخلي
+    'quiet': True,       # تقليل الإخراج
 }
 
 def format_bytes(size):
@@ -162,50 +166,9 @@ async def download_media(
 ) -> tuple[str | None, str | None]:
     """
     يقوم بتحميل الفيديو أو الصوت من الرابط المحدد.
-    يعيد مسار الملف المحمل ونوعه (video/audio) أو (None, None) في حالة الفشل.
+    إصدار مبسط تماماً بدون progress hooks.
     """
-    # متغيرات لتتبع التقدم
-    last_update_time = 0
-    last_percentage = 0
-
-    # إنشاء event loop مسبقاً للاستخدام في progress_hook
-    loop = asyncio.get_event_loop()
-
-    def progress_hook(d):
-        nonlocal last_update_time, last_percentage
-        
-        if d['status'] == 'downloading':
-            current_time = asyncio.get_event_loop().time() if hasattr(asyncio, 'get_event_loop') else 0
-            total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate')
-            
-            if total_bytes:
-                downloaded_bytes = d.get('downloaded_bytes', 0)
-                percentage = (downloaded_bytes / total_bytes) * 100
-                
-                # تحديث كل 3 ثوان أو إذا تغيرت النسبة بمقدار 5%
-                if current_time - last_update_time > 3 or percentage - last_percentage >= 5:
-                    try:
-                        progress_bar = generate_progress_bar(percentage)
-                        # استخدام ensure_future لتشغيل الكوروتين
-                        asyncio.ensure_future(
-                            update_progress_text(
-                                status_message, 
-                                f"⏳ جارٍ التحميل...\n{progress_bar}"
-                            )
-                        )
-                        last_update_time = current_time
-                        last_percentage = percentage
-                    except Exception as e:
-                        logger.debug(f"خطأ في تحديث التقدم: {e}")
-
-    async def update_progress_text(message: Message, text: str):
-        """دالة مساعدة لتحديث نص التقدم"""
-        try:
-            await message.edit_text(text)
-        except Exception as e:
-            if "Message is not modified" not in str(e):
-                logger.debug(f"لا يمكن تعديل الرسالة: {e}")
-
+    
     if not os.path.exists('downloads'):
         os.makedirs('downloads')
     
@@ -219,16 +182,29 @@ async def download_media(
     if format_id and format_id != 'audio':
         opts['format'] = format_id
     
-    opts['progress_hooks'] = [progress_hook]
+    # إزالة أي progress hooks تماماً
+    if 'progress_hooks' in opts:
+        del opts['progress_hooks']
+    
+    # تعطيل أي hooks داخلية قد تسبب المشاكل
+    opts['noprogress'] = True
 
     try:
+        # تحديث الحالة
+        await status_message.edit_text("⏳ جارٍ التحميل... يرجى الانتظار")
+        
         # تشغيل yt-dlp في منفذ منفصل
         with yt_dlp.YoutubeDL(opts) as ydl:
-            # استخدام run_in_executor لتشغيل الكود المتزامن
+            # تعطيل أي logging داخلي لـ yt-dlp قد يتداخل
+            ydl.params['quiet'] = True
+            
             info = await asyncio.get_event_loop().run_in_executor(
                 None, 
                 lambda: ydl.extract_info(url, download=True)
             )
+            
+        await status_message.edit_text("✅ اكتمل التحميل، جارٍ الرفع...")
+        
     except Exception as e:
         logging.error(f"فشل تحميل {media_type}: {e}", exc_info=True)
         await status_message.edit_text(f"❌ فشل التحميل: {str(e)}")
@@ -246,12 +222,22 @@ async def download_media(
         
         # إذا لم يوجد، ابحث عن أي ملف في مجلد التنزيلات ينتهي بـ id الفيديو
         video_id = info.get('id', '')
-        for filename in os.listdir('downloads'):
-            if video_id in filename:
-                filepath = os.path.join('downloads', filename)
-                if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
-                    logging.info(f"تم العثور على الملف: {filepath}")
-                    return filepath, media_type
+        if video_id:
+            for filename in os.listdir('downloads'):
+                if video_id in filename:
+                    filepath = os.path.join('downloads', filename)
+                    if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+                        logging.info(f"تم العثور على الملف: {filepath}")
+                        return filepath, media_type
+        
+        # محاولة أخيرة: احصل على أحدث ملف في المجلد
+        download_files = [f for f in os.listdir('downloads') if os.path.isfile(os.path.join('downloads', f))]
+        if download_files:
+            latest_file = max([os.path.join('downloads', f) for f in download_files], 
+                            key=os.path.getmtime)
+            if os.path.exists(latest_file) and os.path.getsize(latest_file) > 0:
+                logging.info(f"تم العثور على أحدث ملف: {latest_file}")
+                return latest_file, media_type
         
         logging.error("لم يتم العثور على أي ملفات محملة")
         return None, None
