@@ -1,0 +1,6 @@
+# nixpacks.toml
+
+[phases.setup]
+# قائمة الحزم من Nixpkgs التي سيتم تثبيتها
+# ffmpeg هو المطلوب لـ yt-dlp لدمج الفيديو والصوت
+nixPkgs = ["ffmpeg"]
