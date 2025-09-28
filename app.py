@@ -109,30 +109,27 @@ def get_setting(key: str) -> str | None:
 
 # إعدادات yt-dlp لتحميل أفضل صيغة فيديو وصوت ودمجهما
 YDL_OPTS_VIDEO = {
-    # إعادة الإعدادات إلى الوضع الأمثل الذي يعتمد على ffmpeg لدمج أفضل جودة
     'format': 'bestvideo+bestaudio/best',
-    # السماح لـ yt-dlp باختيار الامتداد المناسب أثناء التحميل (مثل mkv)
-    # سيقوم المعالج اللاحق بتحويله إلى mp4
-    'outtmpl': 'downloads/%(id)s.%(ext)s',
+    'outtmpl': 'downloads/%(title)s-%(id)s.%(ext)s',
     'noplaylist': True,
-    'max_filesize': 2000 * 1024 * 1024,
-    # سلسلة معالجات لاحقة مرنة
+    'merge_output_format': 'mp4',
     'postprocessors': [{
         'key': 'FFmpegVideoConvertor',
-        'toformat': 'mp4',
+        'preferedformat': 'mp4',
     }],
+    'http_chunk_size': 10485760,  # 10MB chunks for better progress
 }
 
 YDL_OPTS_AUDIO = {
     'format': 'bestaudio/best',
-    'outtmpl': 'downloads/%(id)s.%(ext)s',
+    'outtmpl': 'downloads/%(title)s-%(id)s.%(ext)s',
     'noplaylist': True,
-    'max_filesize': 2000 * 1024 * 1024, # الحد الأقصى لحجم الصوت
-    # إعادة تفعيل المعالجة اللاحقة لتحويل الصوت إلى صيغة m4a القياسية
     'postprocessors': [{
         'key': 'FFmpegExtractAudio',
         'preferredcodec': 'm4a',
-    }]
+        'preferredquality': '192',
+    }],
+    'http_chunk_size': 10485760,
 }
 
 def format_bytes(size):
@@ -171,57 +168,80 @@ async def download_media(
         nonlocal last_update_time
         if d['status'] == 'downloading':
             current_time = asyncio.get_event_loop().time()
-            # تحديث كل ثانيتين لتجنب أخطاء API Flood
-            if current_time - last_update_time > 2:
+            # تحديث كل 3 ثوان لتجنب أخطاء API Flood
+            if current_time - last_update_time > 3:
                 total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate')
                 if total_bytes:
                     downloaded_bytes = d.get('downloaded_bytes', 0)
                     percentage = (downloaded_bytes / total_bytes) * 100
                     progress_bar = generate_progress_bar(percentage)
                     
-                    # جدولة الكوروتين للتنفيذ في loop الأحداث
-                    # هذا هو الأسلوب الصحيح لاستدعاء دالة async من دالة sync
-                    asyncio.create_task(
-                        status_message.edit_text(
-                            f"⏳ جارٍ التحميل...\n{progress_bar}"
+                    # استخدام run_coroutine_threadsafe للاستدعاء الآمن
+                    try:
+                        asyncio.run_coroutine_threadsafe(
+                            status_message.edit_text(
+                                f"⏳ جارٍ التحميل...\n{progress_bar}"
+                            ),
+                            asyncio.get_event_loop()
                         )
-                    )
+                    except:
+                        pass
                     last_update_time = current_time
 
     if not os.path.exists('downloads'):
         os.makedirs('downloads')
     
-    opts = YDL_OPTS_VIDEO.copy() if media_type == 'video' else YDL_OPTS_AUDIO.copy()
-    if format_id:
+    # استخدام الإعدادات المناسبة بناءً على نوع الوسائط
+    if media_type == 'video':
+        opts = YDL_OPTS_VIDEO.copy()
+    else:
+        opts = YDL_OPTS_AUDIO.copy()
+    
+    # إضافة format_id إذا كان موجوداً
+    if format_id and format_id != 'audio':  # 'audio' هو مفتاح وليس format_id
         opts['format'] = format_id
     
     opts['progress_hooks'] = [progress_hook]
 
-    # تشغيل yt-dlp في منفذ منفصل لتجنب حظر loop الأحداث
+    # تشغيل yt-dlp في منفذ منفصل
     loop = asyncio.get_running_loop()
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        try:
-            # استخدام run_in_executor لتشغيل الكود المتزامن (blocking)
-            info = await loop.run_in_executor(
-                None, lambda: ydl.extract_info(url, download=True)
-            )
-        except Exception as e:
-            logging.error(f"فشل تحميل {media_type}: {e}", exc_info=True)
-            return None, None
-
-    # بعد المعالجة (الدمج والتحويل)، قد يتغير امتداد الملف
-    # المسار الأصلي الذي تم تنزيله
-    original_filepath = ydl.prepare_filename(info)
     
-    # المسار المتوقع بعد المعالجة (التحويل إلى mp4 أو m4a)
-    base_filepath, _ = os.path.splitext(original_filepath)
-    expected_ext = ".mp4" if media_type == 'video' else ".m4a"
-    expected_filepath = base_filepath + expected_ext
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            # استخدام run_in_executor لتشغيل الكود المتزامن
+            info = await loop.run_in_executor(
+                None, 
+                lambda: ydl.extract_info(url, download=True)
+            )
+    except Exception as e:
+        logging.error(f"فشل تحميل {media_type}: {e}", exc_info=True)
+        await status_message.edit_text(f"❌ فشل التحميل: {str(e)}")
+        return None, None
 
-    # استخدم المسار المتوقع إذا كان موجودًا (حدثت معالجة)، وإلا استخدم المسار الأصلي
-    filepath = expected_filepath if os.path.exists(expected_filepath) else original_filepath
-    logging.info(f"اكتمل التحميل: {filepath}")
-    return filepath, media_type
+    # البحث عن الملف الذي تم تحميله
+    try:
+        # الحصول على جميع الملفات في مجلد التنزيلات
+        download_files = os.listdir('downloads')
+        
+        # البحث عن أحدث ملف تم تعديله (الملف الذي تم تحميله حديثاً)
+        if download_files:
+            latest_file = max([os.path.join('downloads', f) for f in download_files], 
+                            key=os.path.getmtime)
+            
+            # التحقق من أن الملف موجود وحجمه أكبر من 0
+            if os.path.exists(latest_file) and os.path.getsize(latest_file) > 0:
+                logging.info(f"تم العثور على الملف: {latest_file}")
+                return latest_file, media_type
+            else:
+                logging.error("الملف المحمل فارغ أو غير موجود")
+                return None, None
+        else:
+            logging.error("لم يتم العثور على أي ملفات في مجلد التنزيلات")
+            return None, None
+            
+    except Exception as e:
+        logging.error(f"خطأ في العثور على الملف المحمل: {e}")
+        return None, None
 
 def get_estimated_size(fmt: dict, duration: float | None) -> float | None:
     """
@@ -450,17 +470,25 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = query.data
     # استعادة البيانات: action, media_type, format_id, original_message_id
-    parts = data.split(":", 3) # download:video:720:12345
-    action, media_type, format_key, original_message_id_str = parts if len(parts) == 4 else (parts[0], None, None, parts[1])
-    original_message_id = int(original_message_id_str)
-
+    parts = data.split(":")
+    
+    if len(parts) < 2:
+        await query.edit_message_text(text="❌ بيانات غير صالحة.")
+        return
+        
+    action = parts[0]
+    
     if action == "cancel":
+        original_message_id = int(parts[1])
         await query.message.delete()
-        # تنظيف chat_data
         context.chat_data.pop(original_message_id, None)
         return
 
-    if action == "download":
+    if action == "download" and len(parts) == 4:
+        media_type = parts[1]
+        format_key = parts[2]
+        original_message_id = int(parts[3])
+
         # استرجاع بيانات الرابط والصيغ من chat_data
         media_info = context.chat_data.get(original_message_id)
         if not media_info:
@@ -470,43 +498,85 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         download_url = media_info.get('url')
         user_id = query.from_user.id
 
-        # استرجاع الصيغة المطلوبة من chat_data باستخدام format_key
+        # استرجاع الصيغة المطلوبة من chat_data
         try:
             # format_key هو 'audio' أو رقم الدقة مثل '720'
-            selected_format = media_info['formats'][int(format_key) if format_key.isdigit() else format_key]
-            format_id = selected_format['format_id']
-            file_size = selected_format.get('filesize') or selected_format.get('filesize_approx')
-        except (KeyError, TypeError):
-            await query.edit_message_text(text="❌ حدث خطأ أثناء استرجاع معلومات الصيغة. قد تكون الرسالة قديمة جداً.")
+            selected_format = media_info['formats'].get(format_key)
+            if not selected_format:
+                # محاولة البحث بالمفتاح الرقمي
+                selected_format = media_info['formats'].get(int(format_key))
+            
+            if not selected_format:
+                await query.edit_message_text(text="❌ لم يتم العثور على الصيغة المطلوبة.")
+                return
+                
+            format_id = selected_format.get('format_id', '')
+            
+        except (KeyError, TypeError, ValueError) as e:
+            logging.error(f"خطأ في استرجاع الصيغة: {e}")
+            await query.edit_message_text(text="❌ حدث خطأ أثناء استرجاع معلومات الصيغة.")
             return
 
         await query.edit_message_text(text=f"⏳ جارٍ تحميل الـ {media_type}، يرجى الانتظار...")
         
-        # الخطأ كان هنا: يجب تمرير query.message و context
-        filepath, downloaded_type = await download_media(download_url, media_type, format_id, query.message, context)
+        # تحميل الوسائط
+        filepath, downloaded_type = await download_media(
+            download_url, 
+            media_type, 
+            format_id, 
+            query.message, 
+            context
+        )
+        
         if not filepath:
             await query.edit_message_text(text=f"❌ فشل تحميل الـ {media_type}. حاول مجدداً أو جرب رابطاً آخر.")
             return
 
         try:
             await query.edit_message_text(text=f"⬆️ جارٍ رفع الـ {downloaded_type}...")
+            
+            # إعداد تقدم الرفع
+            progress = UploadProgress(filepath, query.message)
+            
             with open(filepath, 'rb') as file:
                 if downloaded_type == 'video':
-                    await context.bot.send_video(chat_id=query.message.chat_id, video=file, caption=f"تم التحميل بواسطة @{context.bot.username}", supports_streaming=True)
+                    await context.bot.send_video(
+                        chat_id=query.message.chat_id, 
+                        video=file, 
+                        caption=f"تم التحميل بواسطة @{context.bot.username}", 
+                        supports_streaming=True,
+                        progress=progress,
+                        read_timeout=60,
+                        write_timeout=60
+                    )
                 elif downloaded_type == 'audio':
-                    await context.bot.send_audio(chat_id=query.message.chat_id, audio=file, caption=f"تم التحميل بواسطة @{context.bot.username}")
+                    await context.bot.send_audio(
+                        chat_id=query.message.chat_id, 
+                        audio=file, 
+                        caption=f"تم التحميل بواسطة @{context.bot.username}",
+                        progress=progress,
+                        read_timeout=60,
+                        write_timeout=60
+                    )
             
-            await query.message.delete() # حذف رسالة الأزرار بعد الإرسال
+            await query.message.delete()
+            
         except TelegramError as e:
-            # تنظيف chat_data في حالة الخطأ أيضاً
-            context.chat_data.pop(original_message_id, None)
             logger.error(f"فشل رفع الملف: {e}")
-            await query.edit_message_text(text=f"❌ فشل رفع الملف إلى تليجرام. قد يكون حجمه أكبر من 2 جيجابايت.\n\nالخطأ: {e}")
+            await query.edit_message_text(text=f"❌ فشل رفع الملف إلى تليجرام.\n\nالخطأ: {str(e)}")
+        except Exception as e:
+            logger.error(f"خطأ غير متوقع: {e}")
+            await query.edit_message_text(text=f"❌ حدث خطأ غير متوقع: {str(e)}")
         finally:
-            if os.path.exists(filepath):
-                os.remove(filepath)
-                logger.info(f"تم حذف الملف المؤقت: {filepath}")
-            # تنظيف chat_data بعد الانتهاء بنجاح
+            # تنظيف الملفات المؤقتة
+            if filepath and os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                    logger.info(f"تم حذف الملف المؤقت: {filepath}")
+                except Exception as e:
+                    logger.error(f"خطأ في حذف الملف المؤقت: {e}")
+            
+            # تنظيف chat_data
             context.chat_data.pop(original_message_id, None)
 
 # --- نظام محادثة لوحة تحكم الأدمن ---
