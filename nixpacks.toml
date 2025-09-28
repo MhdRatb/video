@@ -1,8 +1,9 @@
-# config/nixpacks.toml
+# nixpacks.toml
 
 [phases.setup]
-# تثبيت حزم النظام المطلوبة. ffmpeg ضروري لعمليات دمج وتحويل الفيديو/الصوت.
-nixPkgs = ["ffmpeg"]
+# استخدام apt لتثبيت الحزم. هذه الطريقة أكثر مباشرة وموثوقية.
+aptPkgs = ["ffmpeg"]
 
 [start]
+# الأمر الذي سيتم تشغيله لبدء التطبيق
 cmd = "python app.py"
