@@ -117,8 +117,10 @@ YDL_OPTS_VIDEO = {
     'noplaylist': True,
     'max_filesize': 2000 * 1024 * 1024,
     'postprocessors': [{
-        'key': 'FFmpegVideoRemuxer',
-        'preferredformat': 'mp4', # ضمان أن الناتج النهائي سيكون mp4
+        # استخدام FFmpegVideoConvertor لأنه أكثر شمولاً من Remuxer
+        # يمكنه التعامل مع التحويل وإعادة الدمج.
+        'key': 'FFmpegVideoConvertor',
+        'toformat': 'mp4',  # الخيار الصحيح لهذا المعالج هو 'toformat'
     }],
 }
 
