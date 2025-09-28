@@ -121,7 +121,8 @@ YDL_OPTS_VIDEO = {
         # هذا المعالج يقوم فقط بدمج الصيغ دون إعادة ترميز، وهو أسرع.
         # يتم تشغيله فقط إذا لم يكن الملف الناتج mp4 بالفعل.
         'key': 'FFmpegVideoRemuxer',
-        'when': 'after_move',
+        'preferredformat': 'mp4', # تحديد الصيغة النهائية المطلوبة
+        'when': 'after_move', # تشغيل المعالج بعد اكتمال التحميل
     }],
 }
 
@@ -169,26 +170,26 @@ async def download_media(
     """
     last_update_time = 0
 
-    async def progress_hook(d):
+    def progress_hook(d):
         nonlocal last_update_time
         if d['status'] == 'downloading':
             current_time = asyncio.get_event_loop().time()
             # تحديث كل ثانيتين لتجنب أخطاء API Flood
             if current_time - last_update_time > 2:
-                try:
-                    total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate')
-                    if total_bytes:
-                        downloaded_bytes = d.get('downloaded_bytes', 0)
-                        percentage = (downloaded_bytes / total_bytes) * 100
-                        progress_bar = generate_progress_bar(percentage)
-                        await status_message.edit_text(
+                total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate')
+                if total_bytes:
+                    downloaded_bytes = d.get('downloaded_bytes', 0)
+                    percentage = (downloaded_bytes / total_bytes) * 100
+                    progress_bar = generate_progress_bar(percentage)
+                    
+                    # جدولة الكوروتين للتنفيذ في loop الأحداث
+                    # هذا هو الأسلوب الصحيح لاستدعاء دالة async من دالة sync
+                    asyncio.create_task(
+                        status_message.edit_text(
                             f"⏳ جارٍ التحميل...\n{progress_bar}"
                         )
-                        last_update_time = current_time
-                except TelegramError as e:
-                    # تجاهل أخطاء "Message is not modified"
-                    if "Message is not modified" not in str(e):
-                        logger.warning(f"خطأ أثناء تحديث شريط التقدم: {e}")
+                    )
+                    last_update_time = current_time
 
     if not os.path.exists('downloads'):
         os.makedirs('downloads')
@@ -199,25 +200,31 @@ async def download_media(
     
     opts['progress_hooks'] = [progress_hook]
 
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            # بعد المعالجة (الدمج والتحويل)، قد يتغير امتداد الملف
-            # المسار الأصلي الذي تم تنزيله
-            original_filepath = ydl.prepare_filename(info)
-            
-            # المسار المتوقع بعد المعالجة (التحويل إلى mp4 أو m4a)
-            base_filepath, _ = os.path.splitext(original_filepath)
-            expected_ext = ".mp4" if media_type == 'video' else ".m4a"
-            expected_filepath = base_filepath + expected_ext
+    # تشغيل yt-dlp في منفذ منفصل لتجنب حظر loop الأحداث
+    loop = asyncio.get_running_loop()
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        try:
+            # استخدام run_in_executor لتشغيل الكود المتزامن (blocking)
+            info = await loop.run_in_executor(
+                None, lambda: ydl.extract_info(url, download=True)
+            )
+        except Exception as e:
+            logging.error(f"فشل تحميل {media_type}: {e}", exc_info=True)
+            return None, None
 
-            # استخدم المسار المتوقع إذا كان موجودًا (حدثت معالجة)، وإلا استخدم المسار الأصلي
-            filepath = expected_filepath if os.path.exists(expected_filepath) else original_filepath
-            logging.info(f"اكتمل التحميل: {filepath}")
-            return filepath, media_type
-    except Exception as e:
-        logging.error(f"فشل تحميل {media_type}: {e}", exc_info=True)
-        return None, None
+    # بعد المعالجة (الدمج والتحويل)، قد يتغير امتداد الملف
+    # المسار الأصلي الذي تم تنزيله
+    original_filepath = ydl.prepare_filename(info)
+    
+    # المسار المتوقع بعد المعالجة (التحويل إلى mp4 أو m4a)
+    base_filepath, _ = os.path.splitext(original_filepath)
+    expected_ext = ".mp4" if media_type == 'video' else ".m4a"
+    expected_filepath = base_filepath + expected_ext
+
+    # استخدم المسار المتوقع إذا كان موجودًا (حدثت معالجة)، وإلا استخدم المسار الأصلي
+    filepath = expected_filepath if os.path.exists(expected_filepath) else original_filepath
+    logging.info(f"اكتمل التحميل: {filepath}")
+    return filepath, media_type
 
 def get_estimated_size(fmt: dict, duration: float | None) -> float | None:
     """
