@@ -468,13 +468,15 @@ async def admin_panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     # إذا كانت الرسالة جديدة، أرسل لوحة التحكم. إذا كانت تعديلاً، قم بتعديلها.
-    if update.callback_query:
+    # نتحقق إذا كان هناك رسالة موجودة يمكن تعديلها (من ضغط زر)
+    if update.callback_query and update.callback_query.message:
         await update.callback_query.edit_message_text(
             "⚙️ <b>لوحة تحكم الأدمن</b>\n\nاختر الإجراء المطلوب:",
             reply_markup=reply_markup,
             parse_mode=ParseMode.HTML
         )
     else:
+        # إذا لم يكن، نرسل رسالة جديدة (عند بدء الأمر /admin أو العودة من عملية)
         await update.message.reply_text(
             "⚙️ <b>لوحة تحكم الأدمن</b>\n\nاختر الإجراء المطلوب:",
             reply_markup=reply_markup,
@@ -510,7 +512,7 @@ async def handle_subscribe_id(update: Update, context: ContextTypes.DEFAULT_TYPE
         user_id_to_subscribe = int(update.message.text)
         subscribe_user(user_id_to_subscribe)
         await update.message.reply_text(
-            f"✅ تم تفعيل اشتراك المستخدم: `{user_id_to_subscribe}` بنجاح.",
+            f"✅ تم تفعيل اشتراك المستخدم: `{user_id_to_subscribe}` بنجاح\.",
             parse_mode=ParseMode.MARKDOWN_V2
         )
     except (ValueError, IndexError):
@@ -526,7 +528,7 @@ async def handle_unsubscribe_id(update: Update, context: ContextTypes.DEFAULT_TY
         user_id_to_unsubscribe = int(update.message.text)
         unsubscribe_user(user_id_to_unsubscribe)
         await update.message.reply_text(
-            f"✅ تم إلغاء اشتراك المستخدم: `{user_id_to_unsubscribe}` بنجاح.",
+            f"✅ تم إلغاء اشتراك المستخدم: `{user_id_to_unsubscribe}` بنجاح\.",
             parse_mode=ParseMode.MARKDOWN_V2
         )
     except (ValueError, IndexError):
@@ -575,7 +577,7 @@ async def handle_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     users = get_all_users()
     sent_count = 0
     failed_count = 0
-    status_msg = await update.message.reply_text(f"⏳ جارٍ بدء الإذاعة إلى `{len(users)}` مستخدم...", parse_mode=ParseMode.MARKDOWN_V2)
+    status_msg = await update.message.reply_text(f"⏳ جارٍ بدء الإذاعة إلى `{len(users)}` مستخدم\.\.\.", parse_mode=ParseMode.MARKDOWN_V2)
 
     for user_id in users:
         try:
