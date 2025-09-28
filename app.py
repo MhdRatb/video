@@ -117,7 +117,7 @@ YDL_OPTS_VIDEO = {
     'noplaylist': True,
     'max_filesize': 2000 * 1024 * 1024,
     'postprocessors': [{
-        'key': 'FFmpegRemuxer',
+        'key': 'FFmpegVideoRemuxer',
         'preferredformat': 'mp4', # ضمان أن الناتج النهائي سيكون mp4
     }],
 }
