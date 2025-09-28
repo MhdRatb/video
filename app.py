@@ -319,41 +319,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard.append([InlineKeyboardButton(f"🎵 صوت M4A ({size_str})", callback_data=f"download:audio:{best_audio['format_id']}:{update.message.message_id}")])
             available_formats['audio'] = best_audio
 
-        # البحث عن صيغ الفيديو المختلفة
-        resolutions = ['1080', '720', '480', '360', '240']
-        for res in resolutions:
-            # البحث عن أفضل صيغة MP4 مدمجة (فيديو+صوت) لهذه الدقة
-            # تم إزالة شرط الامتداد لزيادة التوافق مع مختلف المنصات
-            best_format = next((f for f in sorted(info.get('formats', []), key=lambda x: (x.get('filesize') or 0), reverse=True)
-                                if f.get('height') == int(res) and f.get('vcodec') != 'none' and f.get('acodec') != 'none'), None)
-            
-            # إذا لم نجد صيغة مدمجة، نبحث عن أفضل فيديو منفصل وندمجه مع أفضل صوت
-            if not best_format:
-                video_only = next((f for f in sorted(info.get('formats', []), key=lambda x: (x.get('tbr') or 0), reverse=True)
-                                   if f.get('height') == int(res) and f.get('vcodec') != 'none' and f.get('acodec') == 'none'), None)
-                if video_only:
-                    # أفضل صوت متاح للدمج
-                    audio_for_merge = next((f for f in sorted(info.get('formats', []), key=lambda x: x.get('tbr') or 0, reverse=True)
-                                            if f.get('acodec') != 'none' and f.get('vcodec') == 'none'), None)
-                    if audio_for_merge:
-                        # --- منطق جديد ومحسّن لتقدير الحجم ---
-                        duration = info.get('duration')
-                        video_size = video_only.get('filesize') or video_only.get('filesize_approx') or (video_only.get('tbr') * 1024 / 8 * duration if video_only.get('tbr') and duration else 0)
-                        audio_size = audio_for_merge.get('filesize') or audio_for_merge.get('filesize_approx') or (audio_for_merge.get('tbr') * 1024 / 8 * duration if audio_for_merge.get('tbr') and duration else 0)
-                        
-                        total_size = video_size + audio_size
-                        best_format = video_only
-                        # نستخدم filesize_approx لتخزين الحجم المقدر
-                        # إذا كان الحجم 0، نجعله None ليظهر "غير معروف" بدلاً من 0.00
-                        best_format['filesize_approx'] = total_size if total_size > 0 else None
-                        
-                        # سنقوم بدمج أفضل فيديو مع أفضل صوت
-                        best_format['format_id'] = f"{video_only['format_id']}+{audio_for_merge['format_id']}"
+        # --- منطق جديد ومرن للبحث عن صيغ الفيديو ---
+        video_formats_by_height = {}
+        for f in info.get('formats', []):
+            # تجاهل الصيغ التي لا تحتوي على فيديو أو لا تحتوي على ارتفاع
+            if f.get('vcodec') == 'none' or not f.get('height'):
+                continue
 
-            if best_format:
-                size_str = format_bytes(best_format.get('filesize') or best_format.get('filesize_approx'))
-                keyboard.append([InlineKeyboardButton(f"🎬 فيديو {res}p ({size_str})", callback_data=f"download:video:{best_format['format_id']}:{update.message.message_id}")])
-                available_formats[res] = best_format
+            height = f['height']
+            # إذا لم تكن هذه الدقة موجودة، أو إذا كانت الصيغة الحالية أفضل، قم بتحديثها
+            # الأفضلية للصيغ المدمجة، ثم الأعلى bitrate
+            is_better = (
+                height not in video_formats_by_height or
+                (f.get('acodec') != 'none' and video_formats_by_height[height].get('acodec') == 'none') or
+                ((f.get('tbr') or 0) > (video_formats_by_height[height].get('tbr') or 0))
+            )
+            if is_better:
+                video_formats_by_height[height] = f
+
+        # فرز الدقات المتاحة من الأعلى إلى الأقل
+        sorted_heights = sorted(video_formats_by_height.keys(), reverse=True)
+
+        for height in sorted_heights:
+            best_format = video_formats_by_height[height]
+            
+            # إذا كانت الصيغة فيديو فقط، قم بدمجها مع أفضل صوت
+            if best_format.get('acodec') == 'none' and best_audio:
+                best_format['format_id'] = f"{best_format['format_id']}+{best_audio['format_id']}"
+                video_size = best_format.get('filesize') or best_format.get('filesize_approx') or 0
+                audio_size = best_audio.get('filesize') or best_audio.get('filesize_approx') or 0
+                best_format['filesize_approx'] = video_size + audio_size
+
+            size_str = format_bytes(best_format.get('filesize') or best_format.get('filesize_approx'))
+            keyboard.append([InlineKeyboardButton(f"🎬 فيديو {height}p ({size_str})", callback_data=f"download:video:{best_format['format_id']}:{update.message.message_id}")])
+            available_formats[height] = best_format
 
         if not keyboard:
             await status_message.edit_text("❌ عذراً، لم يتم العثور على صيغ تحميل مدعومة لهذا الرابط.")
