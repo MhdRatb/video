@@ -1,2 +1,1 @@
-worker: python app.py
-
+worker: which ffmpeg && python app.py
