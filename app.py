@@ -141,17 +141,22 @@ def get_setting(key: str) -> str | None:
 # إعدادات yt-dlp لتحميل أفضل صيغة فيديو وصوت ودمجهما
 YDL_OPTS_VIDEO = {
     # إعادة الإعدادات إلى الوضع الأمثل الذي يعتمد على ffmpeg لدمج أفضل جودة
-    'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-    'outtmpl': 'downloads/%(id)s.%(ext)s', # مسار حفظ الفيديو المؤقت
+    'format': 'bestvideo+bestaudio/best',
+    'outtmpl': 'downloads/%(id)s.mp4', # فرض الإخراج بصيغة mp4
     'noplaylist': True,
-    'max_filesize': 2000 * 1024 * 1024, # 2GB حد أقصى لحجم الفيديو (حد تليجرام)
+    # الحد الأقصى للرفع عبر البوت API هو 50 ميجابايت
+    'max_filesize': 50 * 1024 * 1024,
+    'postprocessors': [{
+        'key': 'FFmpegRemuxer',
+        'preferedformat': 'mp4',
+    }],
 }
 
 YDL_OPTS_AUDIO = {
     'format': 'bestaudio/best',
     'outtmpl': 'downloads/%(id)s.%(ext)s',
     'noplaylist': True,
-    'max_filesize': 2000 * 1024 * 1024,
+    'max_filesize': 50 * 1024 * 1024, # الحد الأقصى للرفع عبر البوت API هو 50 ميجابايت
     # إعادة تفعيل المعالجة اللاحقة لتحويل الصوت إلى صيغة m4a القياسية
     'postprocessors': [{
         'key': 'FFmpegExtractAudio',
@@ -709,3 +714,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
