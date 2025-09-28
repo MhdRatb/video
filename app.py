@@ -4,8 +4,8 @@ import logging
 import os
 import sqlite3
 import yt_dlp
-from telegram import Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+from telegram import Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler, ConversationHandler
 from telegram.constants import ParseMode
 from telegram.error import TelegramError
 
@@ -243,6 +243,18 @@ async def is_user_subscribed(user_id: int, context: ContextTypes.DEFAULT_TYPE) -
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    user_id = user.id
+
+    # إضافة التحقق من الاشتراك هنا أيضاً
+    if not await is_user_subscribed(user_id, context):
+        channel_id = get_setting('force_channel')
+        channel_link = f"https://t.me/{channel_id.lstrip('@')}" if channel_id else ""
+        await update.message.reply_text(
+            f"عذراً، يجب عليك الاشتراك في القناة أولاً للاستمرار: {channel_link}\n\n"
+            "بعد الاشتراك، اضغط على /start مجدداً."
+        )
+        return
+
     add_user(user.id)
     await update.message.reply_html(
         f"أهلاً بك يا {user.mention_html()}!\n\n"
@@ -433,33 +445,141 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # تنظيف chat_data بعد الانتهاء بنجاح
             context.chat_data.pop(original_message_id, None)
 
-# --- أوامر لوحة التحكم (الأدمن) ---
+# --- نظام محادثة لوحة تحكم الأدمن ---
 
-async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS:
-        return
+# تعريف الحالات
+ADMIN_PANEL, AWAITING_BROADCAST, AWAITING_SUBSCRIBE_ID, AWAITING_UNSUBSCRIBE_ID, AWAITING_CHANNEL_ID = range(5)
+
+async def admin_panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """نقطة الدخول لمحادثة الأدمن."""
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        return ConversationHandler.END
+
+    keyboard = [
+        [InlineKeyboardButton("📊 الإحصائيات", callback_data="admin_stats")],
+        [InlineKeyboardButton("📢 إذاعة", callback_data="admin_broadcast")],
+        [InlineKeyboardButton("➕ تفعيل اشتراك", callback_data="admin_subscribe")],
+        [InlineKeyboardButton("➖ إلغاء اشتراك", callback_data="admin_unsubscribe")],
+        [InlineKeyboardButton("📺 ضبط القناة", callback_data="admin_setchannel")],
+        [InlineKeyboardButton("🗑️ حذف القناة", callback_data="admin_delchannel")],
+        [InlineKeyboardButton("❌ إغلاق", callback_data="admin_close")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # إذا كانت الرسالة جديدة، أرسل لوحة التحكم. إذا كانت تعديلاً، قم بتعديلها.
+    if update.callback_query:
+        await update.callback_query.edit_message_text(
+            "⚙️ <b>لوحة تحكم الأدمن</b>\n\nاختر الإجراء المطلوب:",
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.HTML
+        )
+    else:
+        await update.message.reply_text(
+            "⚙️ <b>لوحة تحكم الأدمن</b>\n\nاختر الإجراء المطلوب:",
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.HTML
+        )
+    return ADMIN_PANEL
+
+async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """يعرض إحصائيات البوت."""
+    query = update.callback_query
+    await query.answer()
     user_count = get_user_count()
-    await update.message.reply_text(f"📊 <b>إحصائيات البوت</b>\n\n👥 عدد المستخدمين: {user_count}", parse_mode=ParseMode.HTML)
+    await query.edit_message_text(
+        f"📊 <b>إحصائيات البوت</b>\n\n👥 عدد المستخدمين: {user_count}",
+        parse_mode=ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="admin_back_to_panel")]])
+    )
+    return ADMIN_PANEL
 
-async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS:
-        return
-    if not update.message.reply_to_message:
-        await update.message.reply_text("الرجاء الرد على الرسالة التي تريد إرسالها كإذاعة.")
-        return
+async def admin_request_input(update: Update, context: ContextTypes.DEFAULT_TYPE, message: str, next_state: int) -> int:
+    """دالة مساعدة لطلب إدخال من الأدمن."""
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(
+        text=message,
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="admin_back_to_panel")]])
+    )
+    return next_state
 
+async def handle_subscribe_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """يعالج إدخال ID المستخدم للاشتراك."""
+    try:
+        user_id_to_subscribe = int(update.message.text)
+        subscribe_user(user_id_to_subscribe)
+        await update.message.reply_text(
+            f"✅ تم تفعيل اشتراك المستخدم: `{user_id_to_subscribe}` بنجاح.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ خطأ: الرجاء إدخال معرف مستخدم رقمي صالح.")
+    
+    # العودة إلى لوحة التحكم الرئيسية
+    await admin_panel_command(update, context)
+    return ADMIN_PANEL
+
+async def handle_unsubscribe_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """يعالج إدخال ID المستخدم لإلغاء الاشتراك."""
+    try:
+        user_id_to_unsubscribe = int(update.message.text)
+        unsubscribe_user(user_id_to_unsubscribe)
+        await update.message.reply_text(
+            f"✅ تم إلغاء اشتراك المستخدم: `{user_id_to_unsubscribe}` بنجاح.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ خطأ: الرجاء إدخال معرف مستخدم رقمي صالح.")
+    
+    await admin_panel_command(update, context)
+    return ADMIN_PANEL
+
+async def handle_set_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """يعالج إدخال معرف القناة."""
+    channel_id = update.message.text
+    if not channel_id.startswith('@'):
+        await update.message.reply_text("❌ خطأ: يجب أن يبدأ معرف القناة بـ @.")
+        await admin_panel_command(update, context)
+        return ADMIN_PANEL
+
+    try:
+        bot_member = await context.bot.get_chat_member(chat_id=channel_id, user_id=context.bot.id)
+        if not bot_member.status in ['administrator', 'creator']:
+             await update.message.reply_text("❌ خطأ: يجب أن يكون البوت مشرفًا في القناة أولاً.")
+             await admin_panel_command(update, context)
+             return ADMIN_PANEL
+    except TelegramError:
+        await update.message.reply_text("❌ خطأ: لا يمكن الوصول إلى القناة. تأكد من صحة المعرف وأن البوت عضو فيها.")
+        await admin_panel_command(update, context)
+        return ADMIN_PANEL
+
+    set_setting('force_channel', channel_id)
+    await update.message.reply_text(f"✅ تم تعيين قناة الاشتراك الإجباري إلى: {channel_id}")
+    await admin_panel_command(update, context)
+    return ADMIN_PANEL
+
+async def admin_del_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """يحذف قناة الاشتراك الإجباري."""
+    query = update.callback_query
+    await query.answer()
+    set_setting('force_channel', '')
+    await query.edit_message_text(
+        "✅ تم حذف قناة الاشتراك الإجباري بنجاح.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="admin_back_to_panel")]])
+    )
+    return ADMIN_PANEL
+
+async def handle_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """ينفذ الإذاعة."""
     users = get_all_users()
     sent_count = 0
     failed_count = 0
-    status_msg = await update.message.reply_text(f"⏳ جارٍ بدء الإذاعة إلى {len(users)} مستخدم...")
+    status_msg = await update.message.reply_text(f"⏳ جارٍ بدء الإذاعة إلى `{len(users)}` مستخدم...", parse_mode=ParseMode.MARKDOWN_V2)
 
     for user_id in users:
         try:
-            await context.bot.copy_message(
-                chat_id=user_id,
-                from_chat_id=update.message.chat_id,
-                message_id=update.message.reply_to_message.message_id
-            )
+            await context.bot.copy_message(chat_id=user_id, from_chat_id=update.message.chat_id, message_id=update.message.message_id)
             sent_count += 1
         except TelegramError as e:
             logger.warning(f"فشل إرسال الإذاعة إلى {user_id}: {e}")
@@ -470,98 +590,21 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"✔️ تم الإرسال بنجاح إلى: {sent_count} مستخدم\n"
         f"❌ فشل الإرسال إلى: {failed_count} مستخدم"
     )
+    await admin_panel_command(update, context)
+    return ADMIN_PANEL
 
-async def set_channel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS:
-        return
-    if not context.args:
-        await update.message.reply_text("الاستخدام: /setchannel @channel_username")
-        return
-    
-    channel_id = context.args[0]
-    if not channel_id.startswith('@'):
-        await update.message.reply_text("يجب أن يبدأ معرف القناة بـ @.")
-        return
-
-    try:
-        bot_member = await context.bot.get_chat_member(chat_id=channel_id, user_id=context.bot.id)
-        if not bot_member.status in ['administrator', 'creator']:
-             await update.message.reply_text("يجب أن يكون البوت مشرفًا في القناة أولاً.")
-             return
-    except TelegramError:
-        await update.message.reply_text("لا يمكن الوصول إلى القناة. تأكد من صحة المعرف وأن البوت عضو فيها.")
-        return
-
-    set_setting('force_channel', channel_id)
-    await update.message.reply_text(f"✅ تم تعيين قناة الاشتراك الإجباري إلى: {channel_id}")
-
-async def del_channel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS:
-        return
-    set_setting('force_channel', '')
-    await update.message.reply_text("✅ تم حذف قناة الاشتراك الإجباري.")
-
-async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS:
-        return
-    if not context.args:
-        await update.message.reply_text("الاستخدام: /subscribe <user_id>")
-        return
-    
-    try:
-        user_id_to_subscribe = int(context.args[0])
-        subscribe_user(user_id_to_subscribe)
-        await update.message.reply_text(f"✅ تم تفعيل اشتراك المستخدم: {user_id_to_subscribe}")
-    except (ValueError, IndexError):
-        await update.message.reply_text("الرجاء إدخال معرف مستخدم صالح.")
-
-async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS:
-        return
-    if not context.args:
-        await update.message.reply_text("الاستخدام: /unsubscribe <user_id>")
-        return
-    
-    try:
-        user_id_to_unsubscribe = int(context.args[0])
-        unsubscribe_user(user_id_to_unsubscribe)
-        await update.message.reply_text(f"✅ تم إلغاء اشتراك المستخدم: {user_id_to_unsubscribe}")
-    except (ValueError, IndexError):
-        await update.message.reply_text("الرجاء إدخال معرف مستخدم صالح.")
-
-async def admin_panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS:
-        return
-
-    keyboard = [
-        [InlineKeyboardButton("📊 الإحصائيات", callback_data="admin:stats")],
-        [InlineKeyboardButton("📢 إذاعة (بالرد)", callback_data="admin:broadcast_info")],
-        [InlineKeyboardButton("➕ تفعيل اشتراك", callback_data="admin:subscribe_info")],
-        [InlineKeyboardButton("➖ إلغاء اشتراك", callback_data="admin:unsubscribe_info")],
-        [InlineKeyboardButton("📺 ضبط القناة", callback_data="admin:setchannel_info")],
-        [InlineKeyboardButton("🗑️ حذف القناة", callback_data="admin:delchannel")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("⚙️ <b>لوحة تحكم الأدمن</b>", reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-
-async def admin_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def admin_close_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """يغلق لوحة تحكم الأدمن."""
     query = update.callback_query
     await query.answer()
-    _, command = query.data.split(":", 1)
+    await query.edit_message_text("تم إغلاق لوحة التحكم.")
+    return ConversationHandler.END
 
-    info_texts = {
-        "broadcast_info": "لعمل إذاعة، قم بالرد على الرسالة المراد إرسالها ثم اكتب الأمر /broadcast.",
-        "subscribe_info": "لتفعيل اشتراك، استخدم الأمر: /subscribe <user_id>",
-        "unsubscribe_info": "لإلغاء اشتراك، استخدم الأمر: /unsubscribe <user_id>",
-        "setchannel_info": "لضبط قناة الاشتراك الإجباري، استخدم الأمر: /setchannel @username",
-    }
-
-    if command == "stats":
-        await stats_command(query, context)
-    elif command == "delchannel":
-        await del_channel_command(query, context)
-    elif command in info_texts:
-        await query.edit_message_text(info_texts[command])
+async def admin_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """يلغي العملية الحالية ويعود للوحة التحكم."""
+    await update.message.reply_text("تم إلغاء العملية.")
+    await admin_panel_command(update, context)
+    return ADMIN_PANEL
 
 # ==============================================================================
 # ٥. نقطة انطلاق البوت
@@ -581,23 +624,35 @@ def main():
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     
-    # أوامر الأدمن
-    application.add_handler(CommandHandler("stats", stats_command))
-    application.add_handler(CommandHandler("broadcast", broadcast_command))
-    application.add_handler(CommandHandler("setchannel", set_channel_command))
-    application.add_handler(CommandHandler("delchannel", del_channel_command))
-    application.add_handler(CommandHandler("subscribe", subscribe_command))
-    application.add_handler(CommandHandler("unsubscribe", unsubscribe_command))
-    application.add_handler(CommandHandler("admin", admin_panel_command))
+    # --- محادثة الأدمن ---
+    admin_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("admin", admin_panel_command)],
+        states={
+            ADMIN_PANEL: [
+                CallbackQueryHandler(admin_stats, pattern="^admin_stats$"),
+                CallbackQueryHandler(lambda u, c: admin_request_input(u, c, "أرسل الآن الرسالة التي تريد إذاعتها...", AWAITING_BROADCAST), pattern="^admin_broadcast$"),
+                CallbackQueryHandler(lambda u, c: admin_request_input(u, c, "أرسل الآن معرف المستخدم لتفعيل اشتراكه...", AWAITING_SUBSCRIBE_ID), pattern="^admin_subscribe$"),
+                CallbackQueryHandler(lambda u, c: admin_request_input(u, c, "أرسل الآن معرف المستخدم لإلغاء اشتراكه...", AWAITING_UNSUBSCRIBE_ID), pattern="^admin_unsubscribe$"),
+                CallbackQueryHandler(lambda u, c: admin_request_input(u, c, "أرسل الآن معرف القناة (مثال: @username)...", AWAITING_CHANNEL_ID), pattern="^admin_setchannel$"),
+                CallbackQueryHandler(admin_del_channel, pattern="^admin_delchannel$"),
+                CallbackQueryHandler(admin_close_panel, pattern="^admin_close$"),
+                CallbackQueryHandler(admin_panel_command, pattern="^admin_back_to_panel$"),
+            ],
+            AWAITING_BROADCAST: [MessageHandler(filters.ALL & ~filters.COMMAND, handle_broadcast)],
+            AWAITING_SUBSCRIBE_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_subscribe_id)],
+            AWAITING_UNSUBSCRIBE_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_unsubscribe_id)],
+            AWAITING_CHANNEL_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_set_channel)],
+        },
+        fallbacks=[CommandHandler("cancel", admin_cancel)],
+    )
+    application.add_handler(admin_conv_handler)
 
     # معالج الرسائل النصية التي لا تبدأ بأمر
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # معالج ضغطات الأزرار
     # استخدام نمط مختلف لكل نوع من الأزرار لتنظيم الكود
-    application.add_handler(CallbackQueryHandler(button_callback, pattern=r"^(download|cancel):.*$"))
-    application.add_handler(CallbackQueryHandler(button_callback, pattern="^cancel:.*$"))
-    application.add_handler(CallbackQueryHandler(admin_button_callback, pattern="^admin:.*$"))
+    application.add_handler(CallbackQueryHandler(button_callback, pattern=r"^(download|cancel):"))
 
     # بدء تشغيل البوت
     logger.info("البوت قيد التشغيل...")
