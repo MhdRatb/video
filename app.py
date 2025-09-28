@@ -117,13 +117,10 @@ YDL_OPTS_VIDEO = {
     'noplaylist': True,
     'max_filesize': 2000 * 1024 * 1024,
     # سلسلة معالجات لاحقة مرنة
-    'postprocessors': [
-        # 1. الدمج أولاً (أسرع): يقوم بدمج الفيديو والصوت في حاوية mp4 إذا كانت الترميزات متوافقة
-        {'key': 'FFmpegVideoRemuxer',
-         'preferredformat': 'mp4'},
-        {'key': 'FFmpegVideoConvertor',
-         'toformat': 'mp4'},
-    ],
+    'postprocessors': [{
+        'key': 'FFmpegVideoConvertor',
+        'toformat': 'mp4',
+    }],
 }
 
 YDL_OPTS_AUDIO = {
