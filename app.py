@@ -464,8 +464,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.edit_message_text(text=f"⏳ جارٍ تحميل الـ {media_type}، يرجى الانتظار...")
         
-        filepath, downloaded_type = await download_media(download_url, media_type, format_id)
-
+        # تمرير الرسالة الحالية لتحديثها بشريط التقدم، وتمرير السياق
+        filepath, downloaded_type = await download_media(download_url, media_type, format_id, query.message, context)
         if not filepath:
             await query.edit_message_text(text=f"❌ فشل تحميل الـ {media_type}. حاول مجدداً أو جرب رابطاً آخر.")
             return
