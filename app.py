@@ -200,10 +200,16 @@ async def download_media(
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
             # بعد المعالجة (الدمج والتحويل)، قد يتغير امتداد الملف
-            # لذلك، نستخدم ydl.prepare_filename لإنشاء المسار الصحيح للملف النهائي
-            # مع استبدال الامتداد الأصلي بـ .mp4 للفيديو أو .m4a للصوت
-            base_filepath = ydl.prepare_filename(info).rsplit('.', 1)[0]
-            filepath = f"{base_filepath}.mp4" if media_type == 'video' else f"{base_filepath}.m4a"
+            # المسار الأصلي الذي تم تنزيله
+            original_filepath = ydl.prepare_filename(info)
+            
+            # المسار المتوقع بعد المعالجة (التحويل إلى mp4 أو m4a)
+            base_filepath, _ = os.path.splitext(original_filepath)
+            expected_ext = ".mp4" if media_type == 'video' else ".m4a"
+            expected_filepath = base_filepath + expected_ext
+
+            # استخدم المسار المتوقع إذا كان موجودًا (حدثت معالجة)، وإلا استخدم المسار الأصلي
+            filepath = expected_filepath if os.path.exists(expected_filepath) else original_filepath
             logging.info(f"اكتمل التحميل: {filepath}")
             return filepath, media_type
     except Exception as e:
