@@ -323,13 +323,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         resolutions = ['1080', '720', '480', '360', '240']
         for res in resolutions:
             # البحث عن أفضل صيغة MP4 مدمجة (فيديو+صوت) لهذه الدقة
-            best_format = next((f for f in sorted(info.get('formats', []), key=lambda x: x.get('filesize') or 0, reverse=True)
-                                if f.get('height') == int(res) and f.get('ext') == 'mp4' and f.get('vcodec') != 'none' and f.get('acodec') != 'none'), None)
+            # تم إزالة شرط الامتداد لزيادة التوافق مع مختلف المنصات
+            best_format = next((f for f in sorted(info.get('formats', []), key=lambda x: (x.get('filesize') or 0), reverse=True)
+                                if f.get('height') == int(res) and f.get('vcodec') != 'none' and f.get('acodec') != 'none'), None)
             
             # إذا لم نجد صيغة مدمجة، نبحث عن أفضل فيديو منفصل وندمجه مع أفضل صوت
             if not best_format:
-                video_only = next((f for f in sorted(info.get('formats', []), key=lambda x: x.get('tbr') or 0, reverse=True)
-                                   if f.get('height') == int(res) and f.get('ext') == 'mp4' and f.get('vcodec') != 'none' and f.get('acodec') == 'none'), None)
+                video_only = next((f for f in sorted(info.get('formats', []), key=lambda x: (x.get('tbr') or 0), reverse=True)
+                                   if f.get('height') == int(res) and f.get('vcodec') != 'none' and f.get('acodec') == 'none'), None)
                 if video_only:
                     # أفضل صوت متاح للدمج
                     audio_for_merge = next((f for f in sorted(info.get('formats', []), key=lambda x: x.get('tbr') or 0, reverse=True)
