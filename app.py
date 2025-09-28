@@ -323,8 +323,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     audio_for_merge = next((f for f in sorted(info.get('formats', []), key=lambda x: x.get('tbr') or 0, reverse=True)
                                             if f.get('acodec') != 'none' and f.get('vcodec') == 'none'), None)
                     if audio_for_merge:
-                        video_size = video_only.get('filesize') or video_only.get('filesize_approx') or 0
-                        audio_size = audio_for_merge.get('filesize') or audio_for_merge.get('filesize_approx') or 0
+                        video_size = video_only.get('filesize') or video_only.get('filesize_approx')
+                        audio_size = audio_for_merge.get('filesize') or audio_for_merge.get('filesize_approx')
                         total_size = video_size + audio_size if video_size and audio_size else None
                         best_format = video_only
                         best_format['filesize_approx'] = total_size
@@ -605,4 +605,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
