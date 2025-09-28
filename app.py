@@ -111,13 +111,14 @@ def get_setting(key: str) -> str | None:
 YDL_OPTS_VIDEO = {
     # إعادة الإعدادات إلى الوضع الأمثل الذي يعتمد على ffmpeg لدمج أفضل جودة
     'format': 'bestvideo+bestaudio/best',
-    'outtmpl': 'downloads/%(id)s.mp4', # فرض الإخراج بصيغة mp4
+    # السماح لـ yt-dlp باختيار الامتداد المناسب أثناء التحميل (مثل mkv)
+    # سيقوم المعالج اللاحق بتحويله إلى mp4
+    'outtmpl': 'downloads/%(id)s.%(ext)s',
     'noplaylist': True,
-    # الحد الأقصى لحجم الفيديو (حد تليجرام). ملاحظة: الرفع عبر Bot API القياسي محدود بـ 50 ميجابايت.
     'max_filesize': 2000 * 1024 * 1024,
     'postprocessors': [{
         'key': 'FFmpegRemuxer',
-        'preferredformat': 'mp4', # التأكد من صحة هذا الخيار
+        'preferredformat': 'mp4', # ضمان أن الناتج النهائي سيكون mp4
     }],
 }
 
@@ -198,7 +199,11 @@ async def download_media(
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            filepath = ydl.prepare_filename(info)
+            # بعد المعالجة (الدمج والتحويل)، قد يتغير امتداد الملف
+            # لذلك، نستخدم ydl.prepare_filename لإنشاء المسار الصحيح للملف النهائي
+            # مع استبدال الامتداد الأصلي بـ .mp4 للفيديو أو .m4a للصوت
+            base_filepath = ydl.prepare_filename(info).rsplit('.', 1)[0]
+            filepath = f"{base_filepath}.mp4" if media_type == 'video' else f"{base_filepath}.m4a"
             logging.info(f"اكتمل التحميل: {filepath}")
             return filepath, media_type
     except Exception as e:
