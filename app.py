@@ -28,9 +28,6 @@ DATABASE_NAME = os.path.join(DATABASE_PATH, "bot_data.db") if DATABASE_PATH else
 if not BOT_TOKEN:
     raise ValueError("لم يتم العثور على متغير البيئة BOT_TOKEN. يرجى إضافته.")
 
-# حد التحميل للمستخدمين العاديين (100 ميجابايت)
-FREE_TIER_LIMIT_BYTES = 100 * 1024 * 1024
-
 # ==============================================================================
 # ٢. دوال قاعدة البيانات (بديل لـ database.py)
 # ==============================================================================
@@ -44,8 +41,7 @@ def init_db():
         # جدول لتخزين المستخدمين
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users ( 
-                user_id INTEGER PRIMARY KEY,
-                is_subscriber INTEGER DEFAULT 0
+                user_id INTEGER PRIMARY KEY
             )
         ''')
         # جدول لتخزين الإعدادات (مثل قناة الاشتراك الإجباري)
@@ -56,21 +52,6 @@ def init_db():
             )
         ''')
         conn.commit()
-        # التأكد من وجود عمود is_subscriber في الجداول القديمة
-        try:
-            cursor.execute("SELECT is_subscriber FROM users LIMIT 1")
-        except sqlite3.OperationalError:
-            cursor.execute("ALTER TABLE users ADD COLUMN is_subscriber INTEGER DEFAULT 0")
-            conn.commit()
-            logger.info("تم تحديث جدول المستخدمين بنجاح.")
-
-def is_premium_user(user_id: int) -> bool:
-    """يتحقق مما إذا كان المستخدم مشتركًا."""
-    with sqlite3.connect(DATABASE_NAME) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT is_subscriber FROM users WHERE user_id = ?", (user_id,))
-        result = cursor.fetchone()
-        return result and result[0] == 1
 
 def add_user(user_id: int):
     """
@@ -108,22 +89,6 @@ def set_setting(key: str, value: str):
         cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
         conn.commit()
 
-def subscribe_user(user_id: int):
-    """يجعل المستخدم مشتركًا."""
-    with sqlite3.connect(DATABASE_NAME) as conn:
-        cursor = conn.cursor()
-        # التأكد من وجود المستخدم أولاً
-        cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
-        cursor.execute("UPDATE users SET is_subscriber = 1 WHERE user_id = ?", (user_id,))
-        conn.commit()
-
-def unsubscribe_user(user_id: int):
-    """يلغي اشتراك المستخدم."""
-    with sqlite3.connect(DATABASE_NAME) as conn:
-        cursor = conn.cursor()
-        cursor.execute("UPDATE users SET is_subscriber = 0 WHERE user_id = ?", (user_id,))
-        conn.commit()
-
 def get_setting(key: str) -> str | None:
     """
     يجلب قيمة مفتاح معين من جدول الإعدادات.
@@ -144,8 +109,8 @@ YDL_OPTS_VIDEO = {
     'format': 'bestvideo+bestaudio/best',
     'outtmpl': 'downloads/%(id)s.mp4', # فرض الإخراج بصيغة mp4
     'noplaylist': True,
-    # الحد الأقصى للرفع عبر البوت API هو 50 ميجابايت
-    'max_filesize': 50 * 1024 * 1024,
+    # الحد الأقصى لحجم الفيديو (حد تليجرام). ملاحظة: الرفع عبر Bot API القياسي محدود بـ 50 ميجابايت.
+    'max_filesize': 2000 * 1024 * 1024,
     'postprocessors': [{
         'key': 'FFmpegRemuxer',
         'preferedformat': 'mp4',
@@ -156,7 +121,7 @@ YDL_OPTS_AUDIO = {
     'format': 'bestaudio/best',
     'outtmpl': 'downloads/%(id)s.%(ext)s',
     'noplaylist': True,
-    'max_filesize': 50 * 1024 * 1024, # الحد الأقصى للرفع عبر البوت API هو 50 ميجابايت
+    'max_filesize': 2000 * 1024 * 1024, # الحد الأقصى لحجم الصوت
     # إعادة تفعيل المعالجة اللاحقة لتحويل الصوت إلى صيغة m4a القياسية
     'postprocessors': [{
         'key': 'FFmpegExtractAudio',
@@ -289,11 +254,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>الأوامر المتاحة:</b>\n"
         "/start - بدء استخدام البوت\n"
         "/help - عرض هذه الرسالة\n\n"
-        "<b>أوامر الأدمن (خاصة بالمسؤولين):</b>\n"
-        "/stats - عرض إحصائيات البوت\n"
-        "/broadcast - لعمل إذاعة للمستخدمين (بالرد على رسالة)\n"
-        "/setchannel <code>@username</code> - لضبط قناة الاشتراك الإجباري\n"
-        "/delchannel - لحذف قناة الاشتراك الإجباري"
+        "<b>لوحة تحكم الأدمن (خاصة بالمسؤولين):</b>\n"
+        "/admin - لفتح لوحة التحكم التفاعلية"
     )
     await update.message.reply_html(help_text)
 
@@ -429,7 +391,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         download_url = media_info.get('url')
         user_id = query.from_user.id
-        is_premium = is_premium_user(user_id)
 
         # استرجاع الصيغة المطلوبة من chat_data باستخدام format_key
         try:
@@ -439,16 +400,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             file_size = selected_format.get('filesize') or selected_format.get('filesize_approx')
         except (KeyError, TypeError):
             await query.edit_message_text(text="❌ حدث خطأ أثناء استرجاع معلومات الصيغة. قد تكون الرسالة قديمة جداً.")
-            return
-
-        # التحقق من حجم الملف للمستخدمين العاديين
-        if not is_premium and file_size and file_size > FREE_TIER_LIMIT_BYTES:
-            limit_mb = FREE_TIER_LIMIT_BYTES / (1024*1024)
-            await query.edit_message_text(
-                text=f"🚫 عذراً، حجم الملف يتجاوز الحد المسموح به للمستخدمين العاديين ({limit_mb:.0f} MB).\n\n"
-                     "لتحميل ملفات بأحجام غير محدودة، يرجى الترقية إلى الاشتراك المدفوع.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ إغلاق", callback_data=f"cancel:{original_message_id}")]]),
-            )
             return
 
         await query.edit_message_text(text=f"⏳ جارٍ تحميل الـ {media_type}، يرجى الانتظار...")
@@ -483,7 +434,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- نظام محادثة لوحة تحكم الأدمن ---
 
 # تعريف الحالات
-ADMIN_PANEL, AWAITING_BROADCAST, AWAITING_SUBSCRIBE_ID, AWAITING_UNSUBSCRIBE_ID, AWAITING_CHANNEL_ID = range(5)
+ADMIN_PANEL, AWAITING_BROADCAST, AWAITING_CHANNEL_ID = range(3)
 
 async def admin_panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """نقطة الدخول لمحادثة الأدمن."""
@@ -494,8 +445,6 @@ async def admin_panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     keyboard = [
         [InlineKeyboardButton("📊 الإحصائيات", callback_data="admin_stats")],
         [InlineKeyboardButton("📢 إذاعة", callback_data="admin_broadcast")],
-        [InlineKeyboardButton("➕ تفعيل اشتراك", callback_data="admin_subscribe")],
-        [InlineKeyboardButton("➖ إلغاء اشتراك", callback_data="admin_unsubscribe")],
         [InlineKeyboardButton("📺 ضبط القناة", callback_data="admin_setchannel")],
         [InlineKeyboardButton("🗑️ حذف القناة", callback_data="admin_delchannel")],
         [InlineKeyboardButton("❌ إغلاق", callback_data="admin_close")],
@@ -540,37 +489,6 @@ async def admin_request_input(update: Update, context: ContextTypes.DEFAULT_TYPE
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="admin_back_to_panel")]])
     )
     return next_state
-
-async def handle_subscribe_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """يعالج إدخال ID المستخدم للاشتراك."""
-    try:
-        user_id_to_subscribe = int(update.message.text)
-        subscribe_user(user_id_to_subscribe)
-        await update.message.reply_text(
-            f"✅ تم تفعيل اشتراك المستخدم: `{user_id_to_subscribe}` بنجاح\.",
-            parse_mode=ParseMode.MARKDOWN_V2
-        )
-    except (ValueError, IndexError):
-        await update.message.reply_text("❌ خطأ: الرجاء إدخال معرف مستخدم رقمي صالح.")
-    
-    # العودة إلى لوحة التحكم الرئيسية
-    await admin_panel_command(update, context)
-    return ADMIN_PANEL
-
-async def handle_unsubscribe_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """يعالج إدخال ID المستخدم لإلغاء الاشتراك."""
-    try:
-        user_id_to_unsubscribe = int(update.message.text)
-        unsubscribe_user(user_id_to_unsubscribe)
-        await update.message.reply_text(
-            f"✅ تم إلغاء اشتراك المستخدم: `{user_id_to_unsubscribe}` بنجاح\.",
-            parse_mode=ParseMode.MARKDOWN_V2
-        )
-    except (ValueError, IndexError):
-        await update.message.reply_text("❌ خطأ: الرجاء إدخال معرف مستخدم رقمي صالح.")
-    
-    await admin_panel_command(update, context)
-    return ADMIN_PANEL
 
 async def handle_set_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """يعالج إدخال معرف القناة."""
@@ -668,8 +586,6 @@ def main():
             ADMIN_PANEL: [
                 CallbackQueryHandler(admin_stats, pattern="^admin_stats$"),
                 CallbackQueryHandler(lambda u, c: admin_request_input(u, c, "أرسل الآن الرسالة التي تريد إذاعتها...", AWAITING_BROADCAST), pattern="^admin_broadcast$"),
-                CallbackQueryHandler(lambda u, c: admin_request_input(u, c, "أرسل الآن معرف المستخدم لتفعيل اشتراكه...", AWAITING_SUBSCRIBE_ID), pattern="^admin_subscribe$"),
-                CallbackQueryHandler(lambda u, c: admin_request_input(u, c, "أرسل الآن معرف المستخدم لإلغاء اشتراكه...", AWAITING_UNSUBSCRIBE_ID), pattern="^admin_unsubscribe$"),
                 CallbackQueryHandler(lambda u, c: admin_request_input(u, c, "أرسل الآن معرف القناة (مثال: @username)...", AWAITING_CHANNEL_ID), pattern="^admin_setchannel$"),
                 CallbackQueryHandler(admin_del_channel, pattern="^admin_delchannel$"),
                 CallbackQueryHandler(admin_close_panel, pattern="^admin_close$"),
@@ -677,14 +593,6 @@ def main():
             ],
             AWAITING_BROADCAST: [
                 MessageHandler(filters.ALL & ~filters.COMMAND, handle_broadcast),
-                CallbackQueryHandler(admin_panel_command, pattern="^admin_back_to_panel$"),
-            ],
-            AWAITING_SUBSCRIBE_ID: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_subscribe_id),
-                CallbackQueryHandler(admin_panel_command, pattern="^admin_back_to_panel$"),
-            ],
-            AWAITING_UNSUBSCRIBE_ID: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_unsubscribe_id),
                 CallbackQueryHandler(admin_panel_command, pattern="^admin_back_to_panel$"),
             ],
             AWAITING_CHANNEL_ID: [
@@ -714,4 +622,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
