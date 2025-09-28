@@ -1,6 +1,9 @@
 # nixpacks.toml
 
 [phases.setup]
-# قائمة الحزم من Nixpkgs التي سيتم تثبيتها
-# ffmpeg هو المطلوب لـ yt-dlp لدمج الفيديو والصوت
-nixPkgs = ["ffmpeg"]
+# استخدام apt لتثبيت الحزم. هذه الطريقة أكثر مباشرة وموثوقية.
+aptPkgs = ["ffmpeg"]
+
+[start]
+# الأمر الذي سيتم تشغيله لبدء التطبيق
+cmd = "python app.py"
