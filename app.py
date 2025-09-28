@@ -286,6 +286,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.effective_user.id
     
+    # إضافة المستخدم إلى قاعدة البيانات عند أول تفاعل
+    add_user(user_id)
+    
     if not await is_user_subscribed(user_id, context):
         channel_id = get_setting('force_channel')
         channel_link = f"https://t.me/{channel_id.lstrip('@')}"
@@ -691,3 +694,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
