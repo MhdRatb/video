@@ -130,8 +130,6 @@ YDL_OPTS_VIDEO = {
     'retries': 10,
     'fragment_retries': 10,
     'skip_unavailable_fragments': True,
-    # استخدام ملف الكوكيز المدمج
-    'cookiefile': 'cookies.txt',
     # دعم المواقع المختلفة
     'compat_opts': ['no-youtube-unavailable'],
     'extractor_args': {
@@ -182,8 +180,6 @@ YDL_OPTS_AUDIO = {
     'retries': 10,
     'fragment_retries': 10,
     'skip_unavailable_fragments': True,
-    # استخدام ملف الكوكيز المدمج
-    'cookiefile': 'cookies.txt',
     # إعدادات HTTP
     'http_headers': {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -306,7 +302,13 @@ async def download_media(
         'extract_flat': False,
         'ignoreerrors': True,  # تجاهل الأخطاء للمواقع غير المدعومة جزئياً
     })
-
+    
+    # ==============================================================================
+    # <<< التغيير رقم 1: إضافة ملف الكوكيز بشكل شرطي >>>
+    # ==============================================================================
+    if os.path.exists('cookies.txt') and os.path.getsize('cookies.txt') > 0:
+        opts['cookiefile'] = 'cookies.txt'
+        
     try:
         await status_message.edit_text("⏳ جارٍ التحميل... يرجى الانتظار")
         
@@ -566,12 +568,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'ignoreerrors': True,  # تجاهل الأخطاء للمواقع غير المدعومة جزئياً
             'no_warnings': False,
             'extract_flat': False,  # جلب المعلومات الكاملة
-            # استخدام ملف الكوكيز المدمج لجلب المعلومات أيضاً
-            'cookiefile': 'cookies.txt',
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
             },
         }
+
+        # ==============================================================================
+        # <<< التغيير رقم 2: إضافة ملف الكوكيز بشكل شرطي >>>
+        # ==============================================================================
+        if os.path.exists('cookies.txt') and os.path.getsize('cookies.txt') > 0:
+            info_opts['cookiefile'] = 'cookies.txt'
         
         # جلب المعلومات فقط بدون تحميل
         with yt_dlp.YoutubeDL(info_opts) as ydl:
@@ -1009,9 +1015,12 @@ def main():
     if not os.path.exists('downloads'):
         os.makedirs('downloads')
     
-    # إنشاء ملف cookies.txt فارغ إذا لم يكن موجوداً
-    if not os.path.exists('cookies.txt'):
-        open('cookies.txt', 'a').close()
+    # ==============================================================================
+    # <<< التغيير رقم 3: حذف إنشاء ملف كوكيز فارغ >>>
+    # ==============================================================================
+    # تم حذف السطرين التاليين لأنهما سبب المشكلة
+    # if not os.path.exists('cookies.txt'):
+    #     open('cookies.txt', 'a').close()
 
     # إنشاء تطبيق البوت
     application = Application.builder().token(BOT_TOKEN).build()
