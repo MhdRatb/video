@@ -311,7 +311,7 @@ async def download_media(
         opts['format'] = format_id
 
     try:
-        await status_message.edit_text("⏳ جارٍ التحميل... يرجى الانتظار")
+        #await status_message.edit_text("⏳ جارٍ التحميل... يرجى الانتظار")
         
         # تشغيل yt-dlp في منفذ منفصل
         with yt_dlp.YoutubeDL(opts) as ydl:
