@@ -174,17 +174,27 @@ def format_duration(seconds: float) -> str:
     else:
         return f"{minutes}:{secs:02d}"
 def _is_better_format(new_format: dict, current_format: dict) -> bool:
-    """يقارن بين صيغتين للفيديو ويحدد أيهما أفضل بناءً على معدل البت."""
+    """يقارن بين صيغتين للفيديو ويحدد أيهما أفضل بناءً على جودة الفيديو."""
+    # الأفضلية لمعدل البت للفيديو (vbr)
+    new_vbr = new_format.get('vbr', 0) or 0
+    current_vbr = current_format.get('vbr', 0) or 0
+    if new_vbr != current_vbr:
+        return new_vbr > current_vbr
+
+    # إذا تساوى vbr، الأفضلية لمعدل البت الكلي (tbr)
     new_tbr = new_format.get('tbr', 0) or 0
     current_tbr = current_format.get('tbr', 0) or 0
+    if new_tbr != current_tbr:
+        return new_tbr > current_tbr
     
-    return new_tbr > current_tbr
+    # إذا تساوى vbr و tbr، الأفضلية للحجم (filesize)
+    new_filesize = new_format.get('filesize', 0) or new_format.get('filesize_approx', 0) or 0
+    current_filesize = current_format.get('filesize', 0) or current_format.get('filesize_approx', 0) or 0
+    
+    return new_filesize > current_filesize
 
 def format_bytes(size):
     """يحول البايت إلى صيغة مقروءة (KB, MB, GB) بدقة."""
-    if size is None or size <= 0:
-        return "غير معروف"
-    
     power = 1024
     power_labels = {0: 'B', 1: 'KB', 2: 'MB', 3: 'GB'}
     
@@ -298,7 +308,7 @@ async def download_media(
         logging.error(f"خطأ في العثور على الملف المحمل: {e}")
         return None, None
     
-def get_estimated_size(fmt: dict, duration: float | None) -> float | None:
+def get_estimated_size(fmt: dict, duration: float | None) -> float:
     """
     إصدار مبسط لحساب الحجم بدون تعقيدات.
     """
@@ -329,7 +339,7 @@ def get_estimated_size(fmt: dict, duration: float | None) -> float | None:
             return (abr * 1000 / 8) * duration
     
     # إذا فشلت جميع المحاولات
-    return None
+    return 0.0
 
 class UploadProgress:
     def __init__(self, file_path: str, status_message: Message):
@@ -501,9 +511,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 size_str = format_bytes(audio_size)
                 
                 # التحقق من حجم الملف
-                if audio_size and audio_size > BOT_API_UPLOAD_LIMIT:
+                if audio_size > BOT_API_UPLOAD_LIMIT:
                     keyboard.append([InlineKeyboardButton(f"🎵 صوت M4A ({size_str}) - حجم كبير", callback_data="noop")])
-                else:
+                elif audio_size > 0:
                     keyboard.append([InlineKeyboardButton(f"🎵 صوت M4A ({size_str})", callback_data=f"download:audio:audio:{update.message.message_id}")])
                     available_formats['audio'] = best_audio
 
