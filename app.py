@@ -1,10 +1,9 @@
-# /path/to/your/project/video_bot.py
-
 import asyncio
 import logging
 import os
 import sqlite3
 import yt_dlp
+import dotenv
 from telegram import Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Message
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler, ConversationHandler
 from telegram.constants import ParseMode
@@ -13,7 +12,7 @@ from telegram.error import TelegramError
 # ==============================================================================
 # ١. الإعدادات (بديل لـ config.py)
 # ==============================================================================
-
+dotenv.load_dotenv()
 # ضع هنا توكن البوت الذي حصلت عليه من BotFather
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
@@ -131,6 +130,8 @@ YDL_OPTS_VIDEO = {
     'retries': 3,
     'fragment_retries': 3,
     'skip_unavailable_fragments': True,
+    # استخدام ملف الكوكيز إذا كان موجوداً
+    'cookiefile': 'instagram_cookies.txt',
     # دعم المواقع المختلفة
     'compat_opts': ['no-youtube-unavailable'],
     'extractor_args': {
@@ -162,6 +163,8 @@ YDL_OPTS_AUDIO = {
     'retries': 3,
     'fragment_retries': 3,
     'skip_unavailable_fragments': True,
+    # استخدام ملف الكوكيز إذا كان موجوداً
+    'cookiefile': 'instagram_cookies.txt',
 }
 
 def format_duration(seconds: float) -> str:
@@ -475,6 +478,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'ignoreerrors': False,
                 'no_warnings': False,
                 'extract_flat': False,  # جلب المعلومات الكاملة
+                # استخدام ملف الكوكيز لجلب المعلومات أيضاً
+                'cookiefile': 'instagram_cookies.txt',
             }
             
             # جلب المعلومات فقط بدون تحميل
@@ -909,7 +914,10 @@ if __name__ == "__main__":
     # يقرأ بيانات الكوكيز من متغيرات البيئة وينشئ ملفًا مؤقتًا ليستخدمه yt-dlp
     instagram_cookie_data = os.getenv("INSTAGRAM_COOKIES")
     if instagram_cookie_data:
-        with open("instagram_cookies.txt", "w") as f:
-            f.write(instagram_cookie_data)
-        logger.info("تم إنشاء ملف كوكيز انستغرام بنجاح.")
+        try:
+            with open("instagram_cookies.txt", "w") as f:
+                f.write(instagram_cookie_data)
+            logger.info("تم إنشاء ملف كوكيز انستغرام بنجاح.")
+        except Exception as e:
+            logger.error(f"فشل إنشاء ملف كوكيز انستغرام: {e}")
     main()
