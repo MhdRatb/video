@@ -476,7 +476,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         with yt_dlp.YoutubeDL(info_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            
+        # -->> أضف هذا التحقق هنا <<--
+        if not info:
+            await status_message.edit_text("❌ فشل جلب معلومات الفيديو. قد يكون المحتوى خاصاً، محذوفاً، أو يتطلب تسجيل الدخول.")
+            return
+        
         if '_type' in info and info['_type'] == 'playlist':
             if info['entries']:
                 info = info['entries'][0]
