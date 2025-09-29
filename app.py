@@ -183,24 +183,21 @@ def format_duration(seconds: float) -> str:
     else:
         return f"{minutes}:{secs:02d}"
 def _is_better_format(new_format: dict, current_format: dict) -> bool:
-    """يقارن بين صيغتين للفيديو ويحدد أيهما أفضل بناءً على جودة الفيديو."""
-    # الأفضلية لمعدل البت للفيديو (vbr)
-    new_vbr = new_format.get('vbr', 0) or 0
-    current_vbr = current_format.get('vbr', 0) or 0
-    if new_vbr != current_vbr:
-        return new_vbr > current_vbr
-
-    # إذا تساوى vbr، الأفضلية لمعدل البت الكلي (tbr)
+    """
+    يقارن بين صيغتين للفيديو ويحدد أيهما أفضل.
+    يعطي الأولوية للصيغ التي تحتوي على صوت مدمج، ثم يقارن بمعدل البت.
+    """
+    new_has_audio = new_format.get('acodec') != 'none'
+    current_has_audio = current_format.get('acodec') != 'none'
+    
+    if new_has_audio and not current_has_audio:
+        return True
+    if not new_has_audio and current_has_audio:
+        return False
+    
     new_tbr = new_format.get('tbr', 0) or 0
     current_tbr = current_format.get('tbr', 0) or 0
-    if new_tbr != current_tbr:
-        return new_tbr > current_tbr
-    
-    # إذا تساوى vbr و tbr، الأفضلية للحجم (filesize)
-    new_filesize = new_format.get('filesize', 0) or new_format.get('filesize_approx', 0) or 0
-    current_filesize = current_format.get('filesize', 0) or current_format.get('filesize_approx', 0) or 0
-    
-    return new_filesize > current_filesize
+    return new_tbr > current_tbr
 
 def format_bytes(size):
     """يحول البايت إلى صيغة مقروءة (KB, MB, GB) بدقة."""
