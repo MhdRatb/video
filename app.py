@@ -470,25 +470,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = []
             available_formats = {} # لتخزين أفضل صيغة لكل دقة
             
-            # البحث عن أفضل صيغة صوت M4A
+            # --- منطق محسن للبحث عن الصوت ---
             best_audio = None
+            audio_source_is_video = False
+            
+            # 1. البحث عن أفضل صيغة صوت منفصلة (Audio-only)
             audio_formats = [f for f in info.get('formats', []) 
                             if f.get('vcodec') == 'none' and f.get('acodec') != 'none']
             
             if audio_formats:
-                # اختيار أفضل صيغة صوت (أعلى جودة)
                 best_audio = max(audio_formats, 
                             key=lambda x: x.get('abr', 0) or x.get('tbr', 0) or 0)
-                
+            else:
+                # 2. إذا لم يوجد صوت منفصل، ابحث عن أفضل صيغة مدمجة (فيديو+صوت) لاستخراج الصوت منها
+                muxed_formats = [f for f in info.get('formats', []) 
+                                 if f.get('vcodec') != 'none' and f.get('acodec') != 'none']
+                if muxed_formats:
+                    best_audio = max(muxed_formats, 
+                                key=lambda x: x.get('tbr', 0) or x.get('abr', 0) or 0)
+                    audio_source_is_video = True # علامة لتحديد أن المصدر هو فيديو
+            
+            if best_audio:
                 # حساب الحجم بدقة
-                audio_size = get_estimated_size(best_audio, duration)
+                # إذا كان المصدر فيديو، نحسب حجم الصوت فقط من معدل البت الصوتي (abr)
+                if audio_source_is_video:
+                    audio_size = get_estimated_size({'abr': best_audio.get('abr')}, duration)
+                else:
+                    audio_size = get_estimated_size(best_audio, duration)
+                
                 size_str = format_bytes(audio_size)
                 
                 # التحقق من حجم الملف
                 if audio_size and audio_size > BOT_API_UPLOAD_LIMIT:
                     keyboard.append([InlineKeyboardButton(f"🎵 صوت M4A ({size_str}) - حجم كبير", callback_data="noop")])
                 else:
-                    # إذا كان الحجم مناسباً، يتم إضافة الزر
                     keyboard.append([InlineKeyboardButton(f"🎵 صوت M4A ({size_str})", callback_data=f"download:audio:audio:{update.message.message_id}")])
                     available_formats['audio'] = best_audio
 
@@ -516,7 +531,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # حساب الحجم الإجمالي (فيديو + صوت إذا لزم الأمر)
                 total_size = 0
                 
-                if best_format.get('acodec') == 'none' and best_audio:
+                if best_format.get('acodec') == 'none' and best_audio and not audio_source_is_video:
                     # صيغة فيديو فقط، نضيف حجم الصوت
                     video_size = get_estimated_size(best_format, duration) or 0
                     audio_size = get_estimated_size(best_audio, duration) or 0
@@ -642,6 +657,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # استخدام format_id المحسوب مسبقاً إن وجد
             if 'combined_format' in selected_format:
                 format_id = selected_format['combined_format']
+            elif media_type == 'audio' and selected_format.get('vcodec') != 'none':
+                # إذا كان المطلوب صوت والمصدر هو صيغة فيديو مدمجة، استخدم format_id الخاص بها
+                format_id = selected_format.get('format_id', '')
             else:
                 format_id = selected_format.get('format_id', '')
             
