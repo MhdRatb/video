@@ -106,85 +106,100 @@ def get_setting(key: str) -> str | None:
 # ٣. الدوال المساعدة (بديل لـ helpers.py)
 # ==============================================================================
 
-# إعدادات yt-dlp شاملة لجميع المنصات
-YDL_OPTS_VIDEO = {
-    'format': 'bestvideo+bestaudio/best',
-    'outtmpl': 'downloads/%(title).100s-%(id)s.%(ext)s',
-    'noplaylist': True,
-    'merge_output_format': 'mp4',
-    'postprocessors': [{
-        'key': 'FFmpegVideoConvertor',
-        'preferedformat': 'mp4',
-    }],
-    'restrictfilenames': True,
-    'nooverwrites': True,
-    'noprogress': True,
-    'quiet': True,
-    # إعدادات متقدمة لدعم جميع المنصات
-    'extract_flat': False,
-    'ignoreerrors': True,  # تجاهل الأخطاء للمواقع غير المدعومة جزئياً
-    'no_warnings': False,
-    'verbose': False,
-    # إعدادات الشبكة
-    'socket_timeout': 60,
-    'retries': 10,
-    'fragment_retries': 10,
-    'skip_unavailable_fragments': True,
-    # دعم المواقع المختلفة
-    'compat_opts': ['no-youtube-unavailable'],
-    'extractor_args': {
-        'youtube': {
-            'player_client': ['android', 'web'],
-        },
-        'instagram': {
-            'extract_flat': True,
-        },
-        'tiktok': {
-            'api': ['m', 'web'],
-        },
-        'twitter': {
-            'cards': True,
-        },
-    },
-    # إعدادات إضافية لدعم منصات محددة
-    'extractor_retries': 3,
-    'http_headers': {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-us,en;q=0.5',
-        'Accept-Encoding': 'gzip,deflate',
-        'Accept-Charset': 'ISO-8859-1,utf-8;q=0.7,*;q=0.7',
-        'Connection': 'keep-alive',
-    },
-}
+def setup_cookies():
+    """
+    يقوم بإعداد ملف الكوكيز من متغيرات البيئة أو ينشئ ملفاً فارغاً.
+    """
+    try:
+        # قراءة بيانات الكوكيز من متغيرات البيئة
+        instagram_cookies = os.getenv("INSTAGRAM_COOKIES")
+        youtube_cookies = os.getenv("YOUTUBE_COOKIES")
+        
+        cookies_content = []
+        
+        if youtube_cookies:
+            cookies_content.append("# YouTube Cookies")
+            cookies_content.append(youtube_cookies)
+            cookies_content.append("")
+        
+        if instagram_cookies:
+            cookies_content.append("# Instagram Cookies")
+            cookies_content.append(instagram_cookies)
+            cookies_content.append("")
+        
+        if cookies_content:
+            with open("cookies.txt", "w", encoding="utf-8") as f:
+                f.write("\n".join(cookies_content))
+            logger.info("✅ تم إنشاء ملف الكوكيز بنجاح")
+            return True
+        else:
+            # إنشاء ملف كوكيز فارغ إذا لم توجد بيانات
+            open("cookies.txt", "a").close()
+            logger.info("⚠️ لم يتم العثور على بيانات الكوكيز، سيتم استخدام ملف فارغ")
+            return False
+            
+    except Exception as e:
+        logger.error(f"❌ فشل في إعداد ملف الكوكيز: {e}")
+        # إنشاء ملف فارغ كبديل
+        try:
+            open("cookies.txt", "a").close()
+            return False
+        except:
+            return False
 
-YDL_OPTS_AUDIO = {
-    'format': 'bestaudio/best',
-    'outtmpl': 'downloads/%(title).100s-%(id)s.%(ext)s',
-    'noplaylist': True,
-    'postprocessors': [{
-        'key': 'FFmpegExtractAudio',
-        'preferredcodec': 'm4a',
-        'preferredquality': '192',
-    }],
-    'restrictfilenames': True,
-    'nooverwrites': True,
-    'noprogress': True,
-    'quiet': True,
-    # نفس الإعدادات الإضافية
-    'extract_flat': False,
-    'ignoreerrors': True,
-    'no_warnings': False,
-    'verbose': False,
-    'socket_timeout': 60,
-    'retries': 10,
-    'fragment_retries': 10,
-    'skip_unavailable_fragments': True,
-    # إعدادات HTTP
-    'http_headers': {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-    },
-}
+def get_ydl_opts(media_type='video'):
+    """
+    إرجاع إعدادات yt-dlp مع التعامل الصحيح مع ملف الكوكيز.
+    """
+    base_opts = {
+        'outtmpl': 'downloads/%(title).100s-%(id)s.%(ext)s',
+        'noplaylist': True,
+        'restrictfilenames': True,
+        'nooverwrites': True,
+        'noprogress': True,
+        'quiet': True,
+        'ignoreerrors': True,
+        'no_warnings': False,
+        'socket_timeout': 60,
+        'retries': 10,
+        'fragment_retries': 10,
+        'skip_unavailable_fragments': True,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-us,en;q=0.5',
+            'Accept-Encoding': 'gzip,deflate',
+            'Accept-Charset': 'ISO-8859-1,utf-8;q=0.7,*;q=0.7',
+        },
+    }
+    
+    # التحقق من وجود ملف الكوكيز وإضافته إذا كان موجوداً
+    if os.path.exists('cookies.txt') and os.path.getsize('cookies.txt') > 0:
+        base_opts['cookiefile'] = 'cookies.txt'
+        logger.info("✅ استخدام ملف الكوكيز المتاح")
+    else:
+        logger.info("⚠️ لا يوجد ملف كوكيز، سيتم التحميل بدون كوكيز")
+    
+    if media_type == 'video':
+        base_opts.update({
+            'format': 'bestvideo+bestaudio/best',
+            'merge_output_format': 'mp4',
+            'postprocessors': [{
+                'key': 'FFmpegVideoConvertor',
+                'preferedformat': 'mp4',
+            }],
+        })
+    else:  # audio
+        base_opts.update({
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'm4a',
+                'preferredquality': '192',
+            }],
+        })
+    
+    return base_opts
 
 def format_duration(seconds: float) -> str:
     """يحول المدة من ثوانٍ إلى تنسيق مقروء (س:د:ث)."""
@@ -263,6 +278,8 @@ def get_supported_domains():
         'ok.ru',  # أودنوكلاسنيكي
         'bilibili.com',  # بيلبيل
         'rutube.ru',  # روتيوب
+        'linkedin.com',  # لينكدإن
+        'snapchat.com',  # سناب شات
     ]
 
 def is_supported_url(url: str) -> bool:
@@ -281,34 +298,18 @@ async def download_media(
 ) -> tuple[str | None, str | None]:
     """
     يقوم بتحميل الفيديو أو الصوت من الرابط المحدد.
-    يدعم جميع المواقع المتاحة في yt-dlp.
     """
     
     if not os.path.exists('downloads'):
         os.makedirs('downloads')
     
-    # استخدام الإعدادات المناسبة بناءً على نوع الوسائط
-    if media_type == 'video':
-        opts = YDL_OPTS_VIDEO.copy()
-    else:
-        opts = YDL_OPTS_AUDIO.copy()
+    # استخدام الإعدادات المناسبة
+    opts = get_ydl_opts(media_type)
     
     # إضافة format_id إذا كان موجوداً
     if format_id and format_id != 'audio':
         opts['format'] = format_id
-    
-    # إعدادات إضافية لدعم المواقع المختلفة
-    opts.update({
-        'extract_flat': False,
-        'ignoreerrors': True,  # تجاهل الأخطاء للمواقع غير المدعومة جزئياً
-    })
-    
-    # ==============================================================================
-    # <<< التغيير رقم 1: إضافة ملف الكوكيز بشكل شرطي >>>
-    # ==============================================================================
-    if os.path.exists('cookies.txt') and os.path.getsize('cookies.txt') > 0:
-        opts['cookiefile'] = 'cookies.txt'
-        
+
     try:
         await status_message.edit_text("⏳ جارٍ التحميل... يرجى الانتظار")
         
@@ -324,7 +325,7 @@ async def download_media(
     except Exception as e:
         logging.error(f"فشل تحميل {media_type} من {url}: {e}", exc_info=True)
         
-        # رسائل خطأ أكثر وضوحاً حسب نوع الموقع
+        # رسائل خطأ أكثر وضوحاً
         error_msg = f"❌ فشل التحميل من الرابط"
         if "Unsupported URL" in str(e):
             error_msg += "\n⚠️ الرابط غير مدعوم أو الموقع غير متاح"
@@ -338,6 +339,10 @@ async def download_media(
             error_msg += "\n🚫 الفيديو غير متاح أو تم حذفه"
         elif "This video is not available" in str(e):
             error_msg += "\n🚫 هذا الفيديو غير متاح في منطقتك"
+        elif "failed to load cookies" in str(e):
+            error_msg += "\n🍪 مشكلة في ملف الكوكيز، جارٍ التحميل بدون كوكيز"
+            # إعادة المحاولة بدون كوكيز
+            return await download_without_cookies(url, media_type, format_id, status_message, context)
         else:
             error_msg += f"\n📋 الخطأ: {str(e)}"
             
@@ -357,7 +362,7 @@ async def download_media(
         # إذا لم يوجد، ابحث عن أي ملف في مجلد التنزيلات
         video_id = info.get('id', '') or 'unknown'
         for filename in os.listdir('downloads'):
-            if video_id in filename or 'unknown' in filename:
+            if video_id in filename:
                 filepath = os.path.join('downloads', filename)
                 if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
                     logging.info(f"تم العثور على الملف: {filepath}")
@@ -378,6 +383,50 @@ async def download_media(
         
     except Exception as e:
         logging.error(f"خطأ في العثور على الملف المحمل: {e}")
+        return None, None
+
+async def download_without_cookies(
+    url: str, 
+    media_type: str, 
+    format_id: str, 
+    status_message: Message, 
+    context: ContextTypes.DEFAULT_TYPE
+) -> tuple[str | None, str | None]:
+    """
+    يحاول التحميل بدون استخدام ملف الكوكيز.
+    """
+    try:
+        await status_message.edit_text("🔄 جارٍ المحاولة بدون كوكيز...")
+        
+        opts = get_ydl_opts(media_type)
+        # إزالة ملف الكوكيز من الإعدادات
+        if 'cookiefile' in opts:
+            del opts['cookiefile']
+        
+        # إضافة format_id إذا كان موجوداً
+        if format_id and format_id != 'audio':
+            opts['format'] = format_id
+
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = await asyncio.get_event_loop().run_in_executor(
+                None, 
+                lambda: ydl.extract_info(url, download=True)
+            )
+            
+        await status_message.edit_text("✅ اكتمل التحميل بدون كوكيز، جارٍ الرفع...")
+        
+        # البحث عن الملف المحمل
+        expected_filename = ydl.prepare_filename(info)
+        expected_path = os.path.join('downloads', os.path.basename(expected_filename))
+        
+        if os.path.exists(expected_path):
+            return expected_path, media_type
+        
+        return None, None
+        
+    except Exception as e:
+        logging.error(f"فشل التحميل بدون كوكيز: {e}")
+        await status_message.edit_text("❌ فشل التحميل حتى بدون كوكيز. يرجى المحاولة لاحقاً.")
         return None, None
     
 def get_estimated_size(fmt: dict, duration: float | None) -> float | None:
@@ -485,32 +534,33 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     add_user(user.id)
     
     # رسالة ترحيب محسنة مع قائمة المنصات المدعومة
-    supported_platforms = "\n".join([f"• {domain}" for domain in get_supported_domains()])
+    supported_platforms = "\n".join([f"• {domain}" for domain in get_supported_domains()[:10]])  # عرض أول 10 فقط
     
     await update.message.reply_html(
         f"أهلاً بك يا {user.mention_html()}!\n\n"
         "أنا بوت تحميل الفيديوهات من مختلف المنصات الاجتماعية.\n\n"
-        "<b>المنصات المدعومة:</b>\n"
+        "<b>أهم المنصات المدعومة:</b>\n"
         f"{supported_platforms}\n\n"
         "<b>طريقة الاستخدام:</b>\n"
-        "فقط أرسل رابط الفيديو الذي تريد تحميله وسأقوم بتحميله وإرساله لك."
+        "فقط أرسل رابط الفيديو الذي تريد تحميله وسأقوم بتحميله وإرساله لك.\n\n"
+        "استخدم /supported لعرض جميع المنصات المدعومة."
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    supported_platforms = "\n".join([f"• {domain}" for domain in get_supported_domains()])
+    supported_platforms = "\n".join([f"• {domain}" for domain in get_supported_domains()[:10]])
     
     help_text = (
         "<b>مرحباً بك في بوت تحميل الفيديوهات!</b>\n\n"
-        "<b>المنصات المدعومة:</b>\n"
+        "<b>أهم المنصات المدعومة:</b>\n"
         f"{supported_platforms}\n\n"
         "<b>كيفية الاستخدام:</b>\n"
         "فقط أرسل رابط الفيديو الذي تريد تحميله.\n\n"
         "<b>الأوامر المتاحة:</b>\n"
         "/start - بدء استخدام البوت\n"
         "/help - عرض هذه الرسالة\n"
-        "/supported - عرض المنصات المدعومة\n\n"
-        "<b>لوحة تحكم الأدمن (خاصة بالمسؤولين):</b>\n"
-        "/admin - لفتح لوحة التحكم التفاعلية"
+        "/supported - عرض جميع المنصات المدعومة\n\n"
+        "<b>ملاحظة:</b>\n"
+        "بعض الفيديوهات قد تتطلب وقتاً أطول للتحميل حسب الموقع وحجم الفيديو."
     )
     await update.message.reply_html(help_text)
 
@@ -519,7 +569,7 @@ async def supported_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     supported_platforms = "\n".join([f"• {domain}" for domain in get_supported_domains()])
     
     await update.message.reply_text(
-        f"<b>المنصات المدعومة:</b>\n\n{supported_platforms}\n\n"
+        f"<b>جميع المنصات المدعومة:</b>\n\n{supported_platforms}\n\n"
         "يمكنك إرسال رابط من أي من هذه المنصات وسأقوم بتحميل المحتوى لك.",
         parse_mode=ParseMode.HTML
     )
@@ -562,23 +612,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_message = await update.message.reply_text("⏳ جارٍ جلب معلومات الفيديو...")
 
     try:
-        # إعدادات أكثر مرونة لجلب المعلومات
-        info_opts = {
-            'noplaylist': True,
-            'ignoreerrors': True,  # تجاهل الأخطاء للمواقع غير المدعومة جزئياً
-            'no_warnings': False,
-            'extract_flat': False,  # جلب المعلومات الكاملة
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            },
-        }
+        # استخدام إعدادات موحدة لجلب المعلومات
+        info_opts = get_ydl_opts('video')
+        info_opts.update({
+            'extract_flat': False,
+            'ignoreerrors': True,
+        })
 
-        # ==============================================================================
-        # <<< التغيير رقم 2: إضافة ملف الكوكيز بشكل شرطي >>>
-        # ==============================================================================
-        if os.path.exists('cookies.txt') and os.path.getsize('cookies.txt') > 0:
-            info_opts['cookiefile'] = 'cookies.txt'
-        
         # جلب المعلومات فقط بدون تحميل
         with yt_dlp.YoutubeDL(info_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -593,45 +633,38 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         duration = info.get('duration')
 
-        # --- منطق جديد دقيق لحساب الأحجام ---
+        # --- منطق دقيق لحساب الأحجام ---
         keyboard = []
-        available_formats = {} # لتخزين أفضل صيغة لكل دقة
+        available_formats = {}
         
-        # البحث عن أفضل صيغة صوت M4A
+        # البحث عن أفضل صيغة صوت
         best_audio = None
         audio_formats = [f for f in info.get('formats', []) 
                         if f.get('vcodec') == 'none' and f.get('acodec') != 'none']
         
         if audio_formats:
-            # اختيار أفضل صيغة صوت (أعلى جودة)
             best_audio = max(audio_formats, 
                         key=lambda x: x.get('abr', 0) or x.get('tbr', 0) or 0)
             
-            # حساب الحجم بدقة
             audio_size = get_estimated_size(best_audio, duration)
             size_str = format_bytes(audio_size)
             
-            # التحقق من حجم الملف
             if audio_size and audio_size > BOT_API_UPLOAD_LIMIT:
-                # إذا كان الحجم أكبر من الحد المسموح، يتم تعطيل الزر
                 keyboard.append([InlineKeyboardButton(f"🎵 صوت M4A ({size_str}) - حجم كبير جداً", callback_data="noop")])
             else:
-                # إذا كان الحجم مناسباً، يتم إضافة الزر
                 keyboard.append([InlineKeyboardButton(f"🎵 صوت M4A ({size_str})", callback_data=f"download:audio:audio:{update.message.message_id}")])
                 available_formats['audio'] = best_audio
 
         # --- منطق دقيق للفيديو ---
-        video_formats_by_height = {} # قاموس لتخزين أفضل صيغة لكل دقة
+        video_formats_by_height = {}
         
         for f in info.get('formats', []):
-            # تجاهل الصيغ التي لا تحتوي على فيديو
             if f.get('vcodec') == 'none' or not f.get('height'):
                 continue
 
             height = f['height']
             current_format = video_formats_by_height.get(height)
             
-            # اختيار أفضل صيغة لكل دقة
             if not current_format or _is_better_format(f, current_format):
                 video_formats_by_height[height] = f
 
@@ -641,37 +674,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for height in sorted_heights:
             best_format = video_formats_by_height[height]
             
-            # حساب الحجم الإجمالي (فيديو + صوت إذا لزم الأمر)
             total_size = 0
             
             if best_format.get('acodec') == 'none' and best_audio:
-                # صيغة فيديو فقط، نضيف حجم الصوت
                 video_size = get_estimated_size(best_format, duration) or 0
                 audio_size = get_estimated_size(best_audio, duration) or 0
                 total_size = video_size + audio_size
                 best_format['combined_format'] = f"{best_format['format_id']}+{best_audio['format_id']}"
             else:
-                # صيغة مدمجة (فيديو+صوت)
                 total_size = get_estimated_size(best_format, duration) or 0
             
             size_str = format_bytes(total_size)
             
-            # التحقق من حجم الملف
             if total_size > 0 and total_size > BOT_API_UPLOAD_LIMIT:
-                # إذا كان الحجم أكبر من الحد المسموح، يتم تعطيل الزر
                 keyboard.append([InlineKeyboardButton(f"🎬 فيديو {height}p ({size_str}) - حجم كبير جداً", callback_data="noop")])
             elif total_size > 0:
-                # إذا كان الحجم مناسباً، يتم إضافة الزر
-                # تخزين الحجم المحسوب للاستخدام لاحقاً
                 best_format['calculated_size'] = total_size
                 keyboard.append([InlineKeyboardButton(f"🎬 فيديو {height}p ({size_str})", callback_data=f"download:video:{height}:{update.message.message_id}")])
                 available_formats[height] = best_format
 
         if not keyboard:
-            await status_message.edit_text("❌ عذراً، لم يتم العثور على صيغ تحميل مدعومة لهذا الرابط أو أن جميع الصيغ المتاحة أحجامها كبيرة جداً.")
+            await status_message.edit_text("❌ عذراً، لم يتم العثور على صيغ تحميل مدعومة لهذا الرابط.")
             return
 
-        # تخزين معلومات الصيغ المتاحة في chat_data
+        # تخزين المعلومات في chat_data
         original_message_id = update.message.message_id
         context.chat_data[original_message_id] = {
             'url': url, 
@@ -696,7 +722,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logging.error(f"فشل في جلب معلومات الفيديو من {url}: {e}")
         
-        # رسائل خطأ محددة
+        error_msg = "❌ حدث خطأ أثناء جلب المعلومات"
         if "Unsupported URL" in str(e):
             error_msg = "❌ هذا الرابط غير مدعوم حالياً"
         elif "No video formats found" in str(e):
@@ -705,12 +731,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             error_msg = "❌ الفيديو خاص أو محمي"
         elif "Sign in" in str(e):
             error_msg = "❌ يتطلب تسجيل الدخول أو الاشتراك"
-        elif "Video unavailable" in str(e):
-            error_msg = "❌ الفيديو غير متاح أو تم حذفه"
-        elif "This video is not available" in str(e):
-            error_msg = "❌ هذا الفيديو غير متاح في منطقتك"
-        else:
-            error_msg = f"❌ حدث خطأ أثناء جلب المعلومات: {str(e)}"
+        elif "failed to load cookies" in str(e):
+            error_msg = "❌ مشكلة في الإعدادات، جارٍ المحاولة مرة أخرى..."
+            # يمكن إضافة محاولة إضافية هنا إذا لزم الأمر
             
         await status_message.edit_text(error_msg)
 
@@ -722,7 +745,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     data = query.data
-    # استعادة البيانات: action, media_type, format_id, original_message_id
     parts = data.split(":")
     
     if len(parts) < 2:
@@ -742,7 +764,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         format_key = parts[2]
         original_message_id = int(parts[3])
 
-        # استرجاع بيانات الرابط والصيغ من chat_data
         media_info = context.chat_data.get(original_message_id)
         if not media_info:
             await query.edit_message_text(text="❌ حدث خطأ. ربما تكون هذه الرسالة قديمة جداً. الرجاء إرسال الرابط مرة أخرى.")
@@ -751,12 +772,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         download_url = media_info.get('url')
         user_id = query.from_user.id
 
-        # استرجاع الصيغة المطلوبة من chat_data
         try:
-            # format_key هو 'audio' أو رقم الدقة مثل '720'
             selected_format = media_info['formats'].get(format_key)
             if not selected_format:
-                # محاولة البحث بالمفتاح الرقمي
                 try:
                     selected_format = media_info['formats'].get(int(format_key))
                 except ValueError:
@@ -766,24 +784,18 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text(text="❌ لم يتم العثور على الصيغة المطلوبة.")
                 return
                 
-            # استخدام format_id المحسوب مسبقاً إن وجد
             if 'combined_format' in selected_format:
                 format_id = selected_format['combined_format']
             else:
                 format_id = selected_format.get('format_id', '')
-            
-            # استخدام الحجم المحسوب مسبقاً
-            file_size = selected_format.get('calculated_size')
             
         except (KeyError, TypeError, ValueError) as e:
             logging.error(f"خطأ في معالجة الصيغة: {e}")
             await query.edit_message_text(text="❌ حدث خطأ في معالجة الصيغة المطلوبة.")
             return
 
-        # تحديث رسالة الحالة
         await query.edit_message_text(text="⏳ جارٍ التحميل... يرجى الانتظار")
 
-        # بدء عملية التحميل
         file_path, actual_media_type = await download_media(
             download_url, 
             media_type, 
@@ -796,7 +808,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(text="❌ فشل التحميل. الرجاء المحاولة مرة أخرى.")
             return
 
-        # التحقق من وجود الملف وحجمه
         if not os.path.exists(file_path):
             await query.edit_message_text(text="❌ لم يتم العثور على الملف المحمل.")
             return
@@ -807,11 +818,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             os.remove(file_path)
             return
 
-        # إعداد شريط التقدم
         progress = UploadProgress(file_path, query.message)
 
         try:
-            # إرسال الملف
             if actual_media_type == 'video':
                 await context.bot.send_video(
                     chat_id=query.message.chat_id,
@@ -820,18 +829,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     read_timeout=60,
                     write_timeout=60,
                     connect_timeout=60,
-                    # تمرير دالة التقدم
                     progress=progress.update_progress,
                     progress_args=(file_size,)
                 )
-            else:  # audio
+            else:
                 await context.bot.send_audio(
                     chat_id=query.message.chat_id,
                     audio=open(file_path, 'rb'),
                     read_timeout=60,
                     write_timeout=60,
                     connect_timeout=60,
-                    # تمرير دالة التقدم
                     progress=progress.update_progress,
                     progress_args=(file_size,)
                 )
@@ -846,18 +853,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await query.edit_message_text(text=f"❌ حدث خطأ غير متوقع: {str(e)}")
         finally:
-            # تنظيف الملف المحمل
             try:
                 if os.path.exists(file_path):
                     os.remove(file_path)
             except Exception as e:
                 logging.warning(f"لم أتمكن من حذف الملف {file_path}: {e}")
 
-        # تنظيف البيانات المؤقتة
         context.chat_data.pop(original_message_id, None)
 
 # ==============================================================================
-# ٥. لوحة تحكم الأدمن (بديل لـ admin.py)
+# ٥. لوحة تحكم الأدمن
 # ==============================================================================
 
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -873,6 +878,7 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📊 إحصائيات البوت", callback_data="admin_stats")],
         [InlineKeyboardButton("📢 إرسال رسالة للمستخدمين", callback_data="admin_broadcast")],
         [InlineKeyboardButton("⚙️ إعدادات القناة الإجبارية", callback_data="admin_channel")],
+        [InlineKeyboardButton("🔄 تحديث الكوكيز", callback_data="admin_update_cookies")],
         [InlineKeyboardButton("❌ إغلاق", callback_data="admin_close")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -921,6 +927,13 @@ async def admin_button_callback(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data['awaiting_channel'] = True
         await query.edit_message_text(text=text, parse_mode=ParseMode.HTML)
 
+    elif data == "admin_update_cookies":
+        success = setup_cookies()
+        if success:
+            await query.edit_message_text(text="✅ تم تحديث ملف الكوكيز بنجاح!")
+        else:
+            await query.edit_message_text(text="⚠️ تم إنشاء ملف كوكيز فارغ. يرجى إضافة بيانات الكوكيز في متغيرات البيئة.")
+
     elif data == "admin_close":
         await query.message.delete()
 
@@ -946,7 +959,6 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             try:
                 await context.bot.send_message(chat_id=user, text=text)
                 success_count += 1
-                # تأخير بسيط لتجنب تجاوز حدود تليجرام
                 await asyncio.sleep(0.1)
             except TelegramError as e:
                 logger.error(f"فشل إرسال الرسالة إلى {user}: {e}")
@@ -965,19 +977,16 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             set_setting('force_channel', '')
             await update.message.reply_text("✅ تم حذف القناة الإجبارية.")
         else:
-            # التحقق من صحة معرف القناة
             if not text.startswith('@'):
                 await update.message.reply_text("❌ يجب أن يبدأ معرف القناة بـ @ (مثل @channel_username).")
                 return
             
-            # التحقق من وجود القناة وإمكانية وصول البوت إليها
             try:
                 chat = await context.bot.get_chat(chat_id=text)
                 if chat.type not in ['channel', 'supergroup']:
                     await update.message.reply_text("❌ المعرف المعطى ليس قناة أو مجموعة.")
                     return
                 
-                # محاولة جلب معلومات البوت في القناة (للتأكد من أنه مشترك)
                 bot_member = await context.bot.get_chat_member(chat_id=text, user_id=context.bot.id)
                 if bot_member.status not in ['member', 'administrator', 'creator']:
                     await update.message.reply_text("❌ البوت ليس عضوًا في القناة. يرجى إضافته أولاً.")
@@ -991,13 +1000,12 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    يلغي أي عملية قيد الانتظار (مثل البث أو تعيين القناة).
+    يلغي أي عملية قيد الانتظار.
     """
     user_id = update.effective_user.id
     if user_id not in ADMIN_IDS:
         return
 
-    # تنظيف أي حالة انتظار
     context.user_data.pop('awaiting_broadcast', None)
     context.user_data.pop('awaiting_channel', None)
     
@@ -1015,12 +1023,8 @@ def main():
     if not os.path.exists('downloads'):
         os.makedirs('downloads')
     
-    # ==============================================================================
-    # <<< التغيير رقم 3: حذف إنشاء ملف كوكيز فارغ >>>
-    # ==============================================================================
-    # تم حذف السطرين التاليين لأنهما سبب المشكلة
-    # if not os.path.exists('cookies.txt'):
-    #     open('cookies.txt', 'a').close()
+    # إعداد ملف الكوكيز
+    setup_cookies()
 
     # إنشاء تطبيق البوت
     application = Application.builder().token(BOT_TOKEN).build()
@@ -1041,11 +1045,12 @@ def main():
     # معالج لأزرار التحميل والإلغاء
     application.add_handler(CallbackQueryHandler(button_callback, pattern="^(download|cancel|noop)"))
     
-    # معالج لمدخلات الأدمن النصية (مثل البث وتعيين القناة)
+    # معالج لمدخلات الأدمن النصية
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_input))
 
     # بدء البوت
     print("🤖 بوت تحميل الفيديوهات يعمل الآن...")
+    print("✅ تم إعداد ملف الكوكيز بنجاح")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
