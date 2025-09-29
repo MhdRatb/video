@@ -195,6 +195,12 @@ def _is_better_format(new_format: dict, current_format: dict) -> bool:
 
 def format_bytes(size):
     """يحول البايت إلى صيغة مقروءة (KB, MB, GB) بدقة."""
+    if size is None or size <= 0:
+        return "غير معروف"
+    
+    # تحويل الحجم إلى عدد صحيح لتجنب الأخطاء مع الأرقام العشرية
+    size = int(size)
+    
     power = 1024
     power_labels = {0: 'B', 1: 'KB', 2: 'MB', 3: 'GB'}
     
@@ -564,11 +570,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     available_formats[height] = best_format
 
             if not keyboard:
-                error_text = "❌ لم يتم العثور على صيغ تحميل مدعومة."
+                error_text = "❌ عذراً، لم يتم العثور على صيغ تحميل مدعومة لهذا الرابط."
                 if info.get('live_status') == 'is_live':
                     error_text += "\n\n⚠️ يبدو أن هذا بث مباشر. لا يمكن تحميل البث المباشر حالياً."
                 elif info.get('age_limit', 0) > 0:
                     error_text += "\n\n🔞 المحتوى مقيد بالفئة العمرية وقد يتطلب تسجيل الدخول."
+                elif not info.get('formats'):
+                    error_text += "\n\n❓ قد يكون المحتوى خاصاً أو تم حذفه."
                 
                 await status_message.edit_text(error_text)
                 return
