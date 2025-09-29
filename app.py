@@ -183,18 +183,12 @@ def format_duration(seconds: float) -> str:
     else:
         return f"{minutes}:{secs:02d}"
 def _is_better_format(new_format: dict, current_format: dict) -> bool:
-    """
-    يقارن بين صيغتين للفيديو ويحدد أيهما أفضل.
-    يعطي الأولوية للصيغ التي تحتوي على صوت مدمج، ثم يقارن بمعدل البت.
-    """
-    new_has_audio = new_format.get('acodec') != 'none'
-    current_has_audio = current_format.get('acodec') != 'none'
-    
-    if new_has_audio and not current_has_audio:
-        return True
-    if not new_has_audio and current_has_audio:
-        return False
-    
+    """يقارن بين صيغتين للفيديو ويحدد أيهما أفضل بناءً على معدل البت."""
+    # الأفضلية لمعدل البت للفيديو (vbr) إن وجد، وإلا فاستخدم معدل البت الكلي (tbr)
+    new_bitrate = new_format.get('vbr') or new_format.get('tbr') or 0
+    current_bitrate = current_format.get('vbr') or current_format.get('tbr') or 0
+    return new_bitrate > current_bitrate
+
     new_tbr = new_format.get('tbr', 0) or 0
     current_tbr = current_format.get('tbr', 0) or 0
     return new_tbr > current_tbr
