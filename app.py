@@ -265,17 +265,16 @@ class UploadProgress:
         self._file_path = file_path
         self._status_message = status_message
         self._total_size = os.path.getsize(file_path)
-        self._uploaded_size = 0
         self._last_update_time = 0
         self._last_percentage = -1
 
-    async def __call__(self, current: int, total: int):
+    async def update_progress(self, current: int, total: int):
         """يتم استدعاؤها من قبل مكتبة تليجرام أثناء الرفع."""
         percentage = (current / total) * 100
         current_time = asyncio.get_event_loop().time()
 
-        # تحديث كل ثانيتين أو إذا زادت النسبة 5%
-        if current_time - self._last_update_time > 2 or percentage - self._last_percentage >= 5:
+        # تحديث كل 3 ثوان أو إذا زادت النسبة 10%
+        if current_time - self._last_update_time > 3 or percentage - self._last_percentage >= 10:
             try:
                 progress_bar = generate_progress_bar(percentage)
                 await self._status_message.edit_text(
@@ -286,14 +285,6 @@ class UploadProgress:
             except TelegramError as e:
                 if "Message is not modified" not in str(e):
                     logger.warning(f"خطأ أثناء تحديث شريط تقدم الرفع: {e}")
-
-
-
-
-
-
-
-
 # ==============================================================================
 # ٤. منطق البوت الرئيسي (ملف bot.py سابقاً)
 # ==============================================================================
@@ -507,7 +498,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             selected_format = media_info['formats'].get(format_key)
             if not selected_format:
                 # محاولة البحث بالمفتاح الرقمي
-                selected_format = media_info['formats'].get(int(format_key))
+                try:
+                    selected_format = media_info['formats'].get(int(format_key))
+                except ValueError:
+                    pass
             
             if not selected_format:
                 await query.edit_message_text(text="❌ لم يتم العثور على الصيغة المطلوبة.")
@@ -538,26 +532,24 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await query.edit_message_text(text=f"⬆️ جارٍ رفع الـ {downloaded_type}...")
             
-            # إعداد تقدم الرفع
-            progress = UploadProgress(filepath, query.message)
-            
+            # إرسال الملف بدون معامل progress
             with open(filepath, 'rb') as file:
                 if downloaded_type == 'video':
+                    progress = UploadProgress(filepath, query.message)
                     await context.bot.send_video(
                         chat_id=query.message.chat_id, 
-                        video=file, 
+                        video=open(filepath, 'rb'), 
                         caption=f"تم التحميل بواسطة @{context.bot.username}", 
                         supports_streaming=True,
-                        progress=progress,
                         read_timeout=60,
-                        write_timeout=60
+                        write_timeout=60,
+                        # لسوء الحظ، send_video لا يدعم progress callback في هذه النسخة
                     )
                 elif downloaded_type == 'audio':
                     await context.bot.send_audio(
                         chat_id=query.message.chat_id, 
                         audio=file, 
                         caption=f"تم التحميل بواسطة @{context.bot.username}",
-                        progress=progress,
                         read_timeout=60,
                         write_timeout=60
                     )
