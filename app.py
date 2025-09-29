@@ -180,15 +180,20 @@ def format_duration(seconds: float) -> str:
 def _is_better_format(new_format: dict, current_format: dict) -> bool:
     """يقارن بين صيغتين ويحدد أيهما أفضل."""
     # الأفضلية للصيغ المدمجة (فيديو+صوت)
-    if (new_format.get('acodec') != 'none' and 
-        current_format.get('acodec') == 'none'):
-        return True
+    new_has_audio = new_format.get('acodec') != 'none'
+    current_has_audio = current_format.get('acodec') != 'none'
     
-    # ثم الأفضلية لأعلى معدل بت
+    if new_has_audio and not current_has_audio:
+        return True
+    elif not new_has_audio and current_has_audio:
+        return False
+    
+    # إذا كانتا مدمجتين أو غير مدمجتين، قارن بمعدل البت
     new_tbr = new_format.get('tbr', 0) or 0
     current_tbr = current_format.get('tbr', 0) or 0
     
     return new_tbr > current_tbr
+
 def format_bytes(size):
     """يحول البايت إلى صيغة مقروءة (KB, MB, GB) بدقة."""
     if size is None or size <= 0:
@@ -318,39 +323,35 @@ async def download_media(
     
 def get_estimated_size(fmt: dict, duration: float | None) -> float | None:
     """
-    يقدر حجم الصيغة بالبايت بدقة أكبر.
+    إصدار مبسط لحساب الحجم بدون تعقيدات.
     """
     if not fmt:
         return None
     
-    # 1. الأولوية: filesize المباشر
+    # المحاولة الأولى: filesize المباشر
     size = fmt.get('filesize')
     if size and size > 0:
         return size
     
-    # 2. filesize_approx
+    # المحاولة الثانية: filesize_approx
     size = fmt.get('filesize_approx')
     if size and size > 0:
         return size
     
-    # 3. الحساب من tbr و duration (الأكثر دقة)
+    # المحاولة الثالثة: الحساب من tbr
     if duration and fmt.get('tbr'):
-        # tbr هو بالكيلوبت في الثانية، نحتاج للبايت في الثانية
-        # tbr (kbps) → bytes = (tbr * 1000 / 8) * duration
         tbr = fmt.get('tbr', 0)
         if tbr > 0:
-            size = (tbr * 1000 / 8) * duration
-            return size
+            # tbr (kbps) → bytes = (tbr * 1000 / 8) * duration
+            return (tbr * 1000 / 8) * duration
     
-    # 4. إذا كانت الصيغة مدمجة (فيديو+صوت)، حاول حساب حجم الصوت أيضاً
-    if fmt.get('vcodec') != 'none' and fmt.get('acodec') != 'none':
-        # تقدير حجم الصوت إذا كان هناك فيديو
-        audio_bitrate = fmt.get('abr', 0) or 128  # معدل صوت افتراضي 128 kbps
-        if duration and audio_bitrate > 0:
-            audio_size = (audio_bitrate * 1000 / 8) * duration
-            video_size = get_estimated_size(fmt, duration) or 0
-            return video_size + audio_size
+    # المحاولة الرابعة: إذا كان هناك معدل بت للصوت فقط
+    if duration and fmt.get('vcodec') == 'none' and fmt.get('abr'):
+        abr = fmt.get('abr', 0)
+        if abr > 0:
+            return (abr * 1000 / 8) * duration
     
+    # إذا فشلت جميع المحاولات
     return None
 
 class UploadProgress:
