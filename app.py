@@ -478,7 +478,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'ignoreerrors': False,
                 'no_warnings': False,
                 'extract_flat': False,  # جلب المعلومات الكاملة
-                # استخدام ملف الكوكيز لجلب المعلومات أيضاً
+                # استخدام ملف الكوكيز لجلب المعلومات أيضاً (مهم جداً)
                 'cookiefile': 'instagram_cookies.txt',
             }
             
@@ -912,11 +912,7 @@ def main():
 if __name__ == "__main__":
     # --- إعداد ملف الكوكيز ---
     # يقرأ بيانات الكوكيز من متغيرات البيئة وينشئ ملفًا مؤقتًا ليستخدمه yt-dlp
-    # الأولوية للكوكيز لأنها أكثر أمانًا واستقرارًا
     instagram_cookie_data = os.getenv("INSTAGRAM_COOKIES")
-    instagram_username = os.getenv("INSTAGRAM_USERNAME")
-    instagram_password = os.getenv("INSTAGRAM_PASSWORD")
-
     if instagram_cookie_data:
         try:
             with open("instagram_cookies.txt", "w") as f:
@@ -924,10 +920,4 @@ if __name__ == "__main__":
             logger.info("تم إنشاء ملف كوكيز انستغرام بنجاح.")
         except Exception as e:
             logger.error(f"فشل إنشاء ملف كوكيز انستغرام: {e}")
-    elif instagram_username and instagram_password:
-        # إذا لم تكن الكوكيز موجودة، استخدم اسم المستخدم وكلمة المرور كبديل
-        logger.info("استخدام اسم المستخدم وكلمة المرور للمصادقة مع انستغرام.")
-        YDL_OPTS_VIDEO.update({'username': instagram_username, 'password': instagram_password})
-        YDL_OPTS_AUDIO.update({'username': instagram_username, 'password': instagram_password})
-
     main()
