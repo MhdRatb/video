@@ -669,33 +669,31 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(text="❌ فشل التحميل. حاول مرة أخرى.")
             return
 
-        progress = UploadProgress(filepath, query.message)
-
         try:
-            file_size = os.path.getsize(filepath)
-            if downloaded_type == 'video':
-                await context.bot.send_video(
-                    chat_id=query.message.chat_id,
-                    video=open(filepath, 'rb'),
-                    supports_streaming=True,
-                    read_timeout=60,
-                    write_timeout=60,
-                    connect_timeout=60,
-                    progress=progress.update_progress,
-                    progress_args=(file_size,)
-                )
-            else:
-                await context.bot.send_audio(
-                    chat_id=query.message.chat_id,
-                    audio=open(filepath, 'rb'),
-                    read_timeout=60,
-                    write_timeout=60,
-                    connect_timeout=60,
-                    progress=progress.update_progress,
-                    progress_args=(file_size,)
-                )
-
-            await query.edit_message_text(text="✅ تم الرفع بنجاح!")
+            await query.edit_message_text(text=f"⬆️ جارٍ رفع الـ {downloaded_type}...")
+            
+            # إرسال الملف بدون معامل progress لإصلاح الخطأ
+            with open(filepath, 'rb') as file:
+                if downloaded_type == 'video':
+                    await context.bot.send_video(
+                        chat_id=query.message.chat_id, 
+                        video=file, 
+                        caption=f"تم التحميل بواسطة @{context.bot.username}", 
+                        supports_streaming=True,
+                        read_timeout=60,
+                        write_timeout=60
+                    )
+                elif downloaded_type == 'audio':
+                    await context.bot.send_audio(
+                        chat_id=query.message.chat_id, 
+                        audio=file, 
+                        caption=f"تم التحميل بواسطة @{context.bot.username}",
+                        read_timeout=60,
+                        write_timeout=60
+                    )
+            
+            # حذف الرسالة المؤقتة بعد الرفع بنجاح
+            await query.message.delete()
             
         except TelegramError as e:
             error_message = f"❌ فشل الرفع: {str(e)}"
