@@ -174,17 +174,7 @@ def format_duration(seconds: float) -> str:
     else:
         return f"{minutes}:{secs:02d}"
 def _is_better_format(new_format: dict, current_format: dict) -> bool:
-    """يقارن بين صيغتين ويحدد أيهما أفضل."""
-    # الأفضلية للصيغ المدمجة (فيديو+صوت)
-    new_has_audio = new_format.get('acodec') != 'none'
-    current_has_audio = current_format.get('acodec') != 'none'
-    
-    if new_has_audio and not current_has_audio:
-        return True
-    elif not new_has_audio and current_has_audio:
-        return False
-    
-    # إذا كانتا مدمجتين أو غير مدمجتين، قارن بمعدل البت
+    """يقارن بين صيغتين للفيديو ويحدد أيهما أفضل بناءً على معدل البت."""
     new_tbr = new_format.get('tbr', 0) or 0
     current_tbr = current_format.get('tbr', 0) or 0
     
@@ -549,7 +539,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     available_formats[height] = best_format
 
             if not keyboard:
-                await status_message.edit_text("❌ لم يتم العثور على صيغ تحميل مدعومة.")
+                error_text = "❌ لم يتم العثور على صيغ تحميل مدعومة."
+                if info.get('live_status') == 'is_live':
+                    error_text += "\n\n⚠️ يبدو أن هذا بث مباشر. لا يمكن تحميل البث المباشر حالياً."
+                elif info.get('age_limit', 0) > 0:
+                    error_text += "\n\n🔞 المحتوى مقيد بالفئة العمرية وقد يتطلب تسجيل الدخول."
+                
+                await status_message.edit_text(error_text)
                 return
 
             # تخزين معلومات الصيغ المتاحة في chat_data
