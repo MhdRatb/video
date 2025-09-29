@@ -148,12 +148,21 @@ def get_ydl_opts(media_type='video'):
                 'preferedformat': 'mp4',
             }],
         })
-    else:
+    elif media_type == 'audio_m4a':
         base_opts.update({
             'format': 'bestaudio/best',
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'm4a',
+                'preferredquality': '192',
+            }],
+        })
+    elif media_type == 'audio_mp3':
+        base_opts.update({
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
                 'preferredquality': '192',
             }],
         })
@@ -243,7 +252,11 @@ async def download_media(
     opts = get_ydl_opts(media_type)
     
     # إضافة format_id إذا كان موجوداً
-    if format_id and format_id != 'audio':
+    # نتجاهل format_id عند طلب صوت، لأن yt-dlp سيختار أفضل مصدر صوتي بنفسه
+    if media_type == 'video' and format_id:
+        opts['format'] = format_id
+    # حالة خاصة لدمج الفيديو مع أفضل صوت
+    elif ':' in format_id: # e.g. "video_id:audio_id"
         opts['format'] = format_id
 
     try:
@@ -255,7 +268,13 @@ async def download_media(
                 lambda: ydl.extract_info(url, download=True)
             )
             
-        await status_message.edit_text("✅ اكتمل التحميل، جارٍ الرفع...")
+        # تحديد النوع الفعلي للملف بعد التحويل
+        final_media_type = media_type
+        if media_type == 'audio_m4a' or media_type == 'audio_mp3':
+            final_media_type = 'audio'
+
+        await status_message.edit_text(f"✅ اكتمل التحميل، جارٍ الرفع...")
+        
         
     except Exception as e:
         logging.error(f"فشل تحميل {media_type} من {url}: {e}", exc_info=True)
@@ -277,7 +296,7 @@ async def download_media(
             
         await status_message.edit_text(error_msg)
         return None, None
-
+    
     # البحث عن الملف الذي تم تحميله
     try:
         # الحصول على اسم الملف المتوقع
@@ -286,7 +305,7 @@ async def download_media(
         
         # التحقق من وجود الملف بالامتداد المتوقع أولاً
         if os.path.exists(expected_path):
-            return expected_path, media_type
+            return expected_path, final_media_type
         
         # إذا لم يوجد، ابحث عن أي ملف في مجلد التنزيلات
         video_id = info.get('id', '') or 'unknown'
@@ -295,7 +314,7 @@ async def download_media(
                 filepath = os.path.join('downloads', filename)
                 if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
                     logging.info(f"تم العثور على الملف: {filepath}")
-                    return filepath, media_type
+                    return filepath, final_media_type
         
         # محاولة أخيرة: احصل على أحدث ملف في المجلد
         download_files = [f for f in os.listdir('downloads') 
@@ -305,7 +324,7 @@ async def download_media(
                             key=os.path.getmtime)
             if os.path.exists(latest_file) and os.path.getsize(latest_file) > 0:
                 logging.info(f"تم العثور على أحدث ملف: {latest_file}")
-                return latest_file, media_type
+                return latest_file, final_media_type
         
         logging.error("لم يتم العثور على أي ملفات محملة")
         return None, None
@@ -519,9 +538,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # التحقق من حجم الملف
                 if audio_size > BOT_API_UPLOAD_LIMIT:
                     keyboard.append([InlineKeyboardButton(f"🎵 صوت M4A ({size_str}) - حجم كبير", callback_data="noop")])
+                    keyboard.append([InlineKeyboardButton(f"🎵 صوت MP3 ({size_str}) - حجم كبير", callback_data="noop")])
                 elif audio_size > 0:
-                    keyboard.append([InlineKeyboardButton(f"🎵 صوت M4A ({size_str})", callback_data=f"download:audio:audio:{update.message.message_id}")])
-                    available_formats['audio'] = best_audio
+                    # إضافة زر M4A
+                    keyboard.append([InlineKeyboardButton(f"🎵 صوت M4A ({size_str})", callback_data=f"download:audio_m4a:audio:{update.message.message_id}")])
+                    # إضافة زر MP3
+                    keyboard.append([InlineKeyboardButton(f"🎵 صوت MP3 ({size_str})", callback_data=f"download:audio_mp3:audio:{update.message.message_id}")])
+                    
+                    # تخزين معلومات الصوت. نستخدم مفتاح 'audio' عام
+                    # لأن المصدر هو نفسه لكلا الصيغتين
+                    available_formats['audio'] = best_audio 
+                    # لا نحتاج لتخزين حجم الصوت لأنه ثابت
+                    # ولا نحتاج لتخزين format_id لأنه سيتم تحديده من قبل yt-dlp
+
 
             # --- منطق دقيق للفيديو ---
             video_formats_by_height = {} # قاموس لتخزين أفضل صيغة لكل دقة
@@ -674,12 +703,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
             # استخدام format_id المحسوب مسبقاً إن وجد
             if 'combined_format' in selected_format:
-                format_id = selected_format['combined_format']
-            elif media_type == 'audio' and selected_format.get('vcodec') != 'none':
-                # إذا كان المطلوب صوت والمصدر هو صيغة فيديو مدمجة، استخدم format_id الخاص بها
+                format_id = selected_format['combined_format'].replace('audio_id', media_info['best_audio']['format_id'])
+            elif media_type.startswith('audio') and selected_format.get('vcodec') != 'none':
+                # إذا كان المطلوب صوت والمصدر هو صيغة فيديو مدمجة، استخدم format_id الخاص بها ليتمكن yt-dlp من استخراج الصوت
                 format_id = selected_format.get('format_id', '')
             else:
-                format_id = selected_format.get('format_id', '')
+                format_id = selected_format.get('format_id', '') or 'best'
             
         except (KeyError, TypeError, ValueError) as e:
             logging.error(f"خطأ في استرجاع الصيغة: {e}")
