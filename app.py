@@ -512,13 +512,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 # حساب الحجم بدقة
                 audio_size = get_estimated_size(best_audio, duration)
-                if not audio_size or audio_size <= BOT_API_UPLOAD_LIMIT:
-                    size_str = format_bytes(audio_size)
+                size_str = format_bytes(audio_size)
+                
+                # التحقق من حجم الملف
+                if audio_size and audio_size > BOT_API_UPLOAD_LIMIT:
+                    # إذا كان الحجم أكبر من الحد المسموح، يتم تعطيل الزر
+                    keyboard.append([InlineKeyboardButton(f"🎵 صوت M4A ({size_str}) - حجم كبير جداً", callback_data="noop")])
+                else:
+                    # إذا كان الحجم مناسباً، يتم إضافة الزر
                     keyboard.append([InlineKeyboardButton(f"🎵 صوت M4A ({size_str})", callback_data=f"download:audio:audio:{update.message.message_id}")])
                     available_formats['audio'] = best_audio
 
             # --- منطق دقيق للفيديو ---
-            video_formats_by_height = {}
+            video_formats_by_height = {} # قاموس لتخزين أفضل صيغة لكل دقة
             
             for f in info.get('formats', []):
                 # تجاهل الصيغ التي لا تحتوي على فيديو
@@ -551,16 +557,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     # صيغة مدمجة (فيديو+صوت)
                     total_size = get_estimated_size(best_format, duration) or 0
                 
-                # التحقق من أن حجم الملف لا يتجاوز حد الرفع
-                if total_size > 0 and total_size <= BOT_API_UPLOAD_LIMIT:
-                    size_str = format_bytes(total_size)
+                size_str = format_bytes(total_size)
+                
+                # التحقق من حجم الملف
+                if total_size > 0 and total_size > BOT_API_UPLOAD_LIMIT:
+                    # إذا كان الحجم أكبر من الحد المسموح، يتم تعطيل الزر
+                    keyboard.append([InlineKeyboardButton(f"🎬 فيديو {height}p ({size_str}) - حجم كبير جداً", callback_data="noop")])
+                elif total_size > 0:
+                    # إذا كان الحجم مناسباً، يتم إضافة الزر
                     # تخزين الحجم المحسوب للاستخدام لاحقاً
                     best_format['calculated_size'] = total_size
                     keyboard.append([InlineKeyboardButton(f"🎬 فيديو {height}p ({size_str})", callback_data=f"download:video:{height}:{update.message.message_id}")])
                     available_formats[height] = best_format
 
             if not keyboard:
-                await status_message.edit_text("❌ عذراً، لم يتم العثور على صيغ تحميل مدعومة لهذا الرابط.")
+                await status_message.edit_text("❌ عذراً، لم يتم العثور على صيغ تحميل مدعومة لهذا الرابط أو أن جميع الصيغ المتاحة أحجامها كبيرة جداً.")
                 return
 
             # تخزين معلومات الصيغ المتاحة في chat_data
@@ -603,6 +614,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_message.edit_text(error_msg)
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    if query.data == "noop":
+        await query.answer("⚠️ هذا الخيار غير متاح لأن حجم الملف يتجاوز 50 ميجابايت.", show_alert=True)
+        return
     await query.answer()
 
     data = query.data
