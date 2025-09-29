@@ -1,5 +1,3 @@
-# /path/to/your/project/video_bot.py
-
 import asyncio
 import logging
 import os
@@ -137,18 +135,52 @@ YDL_OPTS_AUDIO = {
     'noprogress': True,  # تعطيل progress الداخلي
     'quiet': True,       # تقليل الإخراج
 }
-
-def format_bytes(size):
-    """يحول البايت إلى صيغة مقروءة (KB, MB, GB)."""
-    if size is None:
+def format_duration(seconds: float) -> str:
+    """يحول المدة من ثوانٍ إلى تنسيق مقروء (س:د:ث)."""
+    if not seconds:
         return "غير معروف"
+    
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    else:
+        return f"{minutes}:{secs:02d}"
+def _is_better_format(new_format: dict, current_format: dict) -> bool:
+    """يقارن بين صيغتين ويحدد أيهما أفضل."""
+    # الأفضلية للصيغ المدمجة (فيديو+صوت)
+    if (new_format.get('acodec') != 'none' and 
+        current_format.get('acodec') == 'none'):
+        return True
+    
+    # ثم الأفضلية لأعلى معدل بت
+    new_tbr = new_format.get('tbr', 0) or 0
+    current_tbr = current_format.get('tbr', 0) or 0
+    
+    return new_tbr > current_tbr
+def format_bytes(size):
+    """يحول البايت إلى صيغة مقروءة (KB, MB, GB) بدقة."""
+    if size is None or size <= 0:
+        return "غير معروف"
+    
     power = 1024
+    power_labels = {0: 'B', 1: 'KB', 2: 'MB', 3: 'GB'}
+    
     n = 0
-    power_labels = {0: '', 1: 'KB', 2: 'MB', 3: 'GB'}
-    while size > power and n < len(power_labels) -1 :
+    while size >= power and n < len(power_labels) - 1:
         size /= power
         n += 1
-    return f"{size:.2f} {power_labels[n]}"
+    
+    if n == 0:  # بايت
+        return f"{size:.0f} {power_labels[n]}"
+    elif size < 10:  # أرقام صغيرة
+        return f"{size:.2f} {power_labels[n]}"
+    elif size < 100:  # أرقام متوسطة
+        return f"{size:.1f} {power_labels[n]}"
+    else:  # أرقام كبيرة
+        return f"{size:.0f} {power_labels[n]}"
 
 def generate_progress_bar(percentage: float) -> str:
     """ينشئ شريط تقدم نصي."""
@@ -248,17 +280,40 @@ async def download_media(
 
 def get_estimated_size(fmt: dict, duration: float | None) -> float | None:
     """
-    يقدر حجم الصيغة بالبايت.
-    يعتمد على filesize، ثم filesize_approx، ثم يحسبه من tbr و duration.
+    يقدر حجم الصيغة بالبايت بدقة أكبر.
     """
     if not fmt:
         return None
     
-    size = fmt.get('filesize') or fmt.get('filesize_approx')
-    if not size and duration and fmt.get('tbr'):
-        size = (fmt.get('tbr') * 1024 / 8) * duration
+    # 1. الأولوية: filesize المباشر
+    size = fmt.get('filesize')
+    if size and size > 0:
+        return size
     
-    return size if size and size > 0 else None
+    # 2. filesize_approx
+    size = fmt.get('filesize_approx')
+    if size and size > 0:
+        return size
+    
+    # 3. الحساب من tbr و duration (الأكثر دقة)
+    if duration and fmt.get('tbr'):
+        # tbr هو بالكيلوبت في الثانية، نحتاج للبايت في الثانية
+        # tbr (kbps) → bytes = (tbr * 1000 / 8) * duration
+        tbr = fmt.get('tbr', 0)
+        if tbr > 0:
+            size = (tbr * 1000 / 8) * duration
+            return size
+    
+    # 4. إذا كانت الصيغة مدمجة (فيديو+صوت)، حاول حساب حجم الصوت أيضاً
+    if fmt.get('vcodec') != 'none' and fmt.get('acodec') != 'none':
+        # تقدير حجم الصوت إذا كان هناك فيديو
+        audio_bitrate = fmt.get('abr', 0) or 128  # معدل صوت افتراضي 128 kbps
+        if duration and audio_bitrate > 0:
+            audio_size = (audio_bitrate * 1000 / 8) * duration
+            video_size = get_estimated_size(fmt, duration) or 0
+            return video_size + audio_size
+    
+    return None
 
 class UploadProgress:
     def __init__(self, file_path: str, status_message: Message):
@@ -375,79 +430,99 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_message = await update.message.reply_text("⏳ جارٍ جلب معلومات الفيديو...")
 
     try:
-        # جلب المعلومات فقط بدون تحميل
-        with yt_dlp.YoutubeDL({'noplaylist': True}) as ydl:
-            info = ydl.extract_info(url, download=False)
-        duration = info.get('duration')
+            # جلب المعلومات فقط بدون تحميل
+            with yt_dlp.YoutubeDL({'noplaylist': True}) as ydl:
+                info = ydl.extract_info(url, download=False)
+            duration = info.get('duration')
 
-        # --- منطق جديد لتجميع خيارات التحميل ---
-        keyboard = []
-        available_formats = {} # لتخزين أفضل صيغة لكل دقة
-        # البحث عن أفضل صيغة صوت M4A
-        best_audio = next((f for f in sorted(info.get('formats', []), key=lambda x: x.get('filesize') or 0, reverse=True) 
-                           if f.get('vcodec') == 'none' and f.get('ext') == 'm4a'), None)
-        if best_audio:
-            best_audio['filesize_approx'] = get_estimated_size(best_audio, duration)
-            # التحقق من أن حجم الملف لا يتجاوز حد الرفع
-            if not best_audio['filesize_approx'] or best_audio['filesize_approx'] <= BOT_API_UPLOAD_LIMIT:
-                size_str = format_bytes(best_audio['filesize_approx'])
-                keyboard.append([InlineKeyboardButton(f"🎵 صوت M4A ({size_str})", callback_data=f"download:audio:audio:{update.message.message_id}")])
-                available_formats['audio'] = best_audio
-
-        # --- منطق جديد ومرن للبحث عن صيغ الفيديو ---
-        video_formats_by_height = {}
-        for f in info.get('formats', []):
-            # تجاهل الصيغ التي لا تحتوي على فيديو أو لا تحتوي على ارتفاع
-            if f.get('vcodec') == 'none' or not f.get('height'):
-                continue
-
-            height = f['height']
-            # إذا لم تكن هذه الدقة موجودة، أو إذا كانت الصيغة الحالية أفضل، قم بتحديثها
-            # الأفضلية للصيغ المدمجة، ثم الأعلى bitrate
-            is_better = (
-                height not in video_formats_by_height or
-                (f.get('acodec') != 'none' and video_formats_by_height[height].get('acodec') == 'none') or
-                ((f.get('tbr') or 0) > (video_formats_by_height[height].get('tbr') or 0))
-            )
-            if is_better:
-                video_formats_by_height[height] = f
-
-        # فرز الدقات المتاحة من الأعلى إلى الأقل
-        sorted_heights = sorted(video_formats_by_height.keys(), reverse=True)
-
-        for height in sorted_heights:
-            best_format = video_formats_by_height[height]
+            # --- منطق جديد دقيق لحساب الأحجام ---
+            keyboard = []
+            available_formats = {} # لتخزين أفضل صيغة لكل دقة
             
-            # إذا كانت الصيغة فيديو فقط، قم بدمجها مع أفضل صوت
-            if best_format.get('acodec') == 'none' and best_audio:
-                video_size = get_estimated_size(best_format, duration) or 0
-                audio_size = get_estimated_size(best_audio, duration) or 0
-                total_size = video_size + audio_size
-                best_format['filesize_approx'] = total_size if total_size > 0 else None
-                best_format['format_id'] = f"{best_format['format_id']}+{best_audio['format_id']}" # يتم تحديثه بعد حساب الحجم
-            else: # إذا كانت الصيغة مدمجة بالفعل
-                best_format['filesize_approx'] = get_estimated_size(best_format, duration)
+            # البحث عن أفضل صيغة صوت M4A
+            best_audio = None
+            audio_formats = [f for f in info.get('formats', []) 
+                            if f.get('vcodec') == 'none' and f.get('acodec') != 'none']
+            
+            if audio_formats:
+                # اختيار أفضل صيغة صوت (أعلى جودة)
+                best_audio = max(audio_formats, 
+                            key=lambda x: x.get('abr', 0) or x.get('tbr', 0) or 0)
+                
+                # حساب الحجم بدقة
+                audio_size = get_estimated_size(best_audio, duration)
+                if not audio_size or audio_size <= BOT_API_UPLOAD_LIMIT:
+                    size_str = format_bytes(audio_size)
+                    keyboard.append([InlineKeyboardButton(f"🎵 صوت M4A ({size_str})", callback_data=f"download:audio:audio:{update.message.message_id}")])
+                    available_formats['audio'] = best_audio
 
-            # التحقق من أن حجم الملف لا يتجاوز حد الرفع
-            if not best_format['filesize_approx'] or best_format['filesize_approx'] <= BOT_API_UPLOAD_LIMIT:
-                size_str = format_bytes(best_format['filesize_approx'])
-                keyboard.append([InlineKeyboardButton(f"🎬 فيديو {height}p ({size_str})", callback_data=f"download:video:{height}:{update.message.message_id}")])
-                available_formats[height] = best_format
+            # --- منطق دقيق للفيديو ---
+            video_formats_by_height = {}
+            
+            for f in info.get('formats', []):
+                # تجاهل الصيغ التي لا تحتوي على فيديو
+                if f.get('vcodec') == 'none' or not f.get('height'):
+                    continue
 
-        if not keyboard:
-            await status_message.edit_text("❌ عذراً، لم يتم العثور على صيغ تحميل مدعومة لهذا الرابط.")
-            return
+                height = f['height']
+                current_format = video_formats_by_height.get(height)
+                
+                # اختيار أفضل صيغة لكل دقة
+                if not current_format or _is_better_format(f, current_format):
+                    video_formats_by_height[height] = f
 
-        # تخزين معلومات الصيغ المتاحة في chat_data
-        original_message_id = update.message.message_id
-        context.chat_data[original_message_id] = {'url': url, 'formats': available_formats}
+            # فرز الدقات المتاحة من الأعلى إلى الأقل
+            sorted_heights = sorted(video_formats_by_height.keys(), reverse=True)
 
-        # إضافة زر الإلغاء
-        keyboard.append([InlineKeyboardButton("❌ إلغاء", callback_data=f"cancel:{original_message_id}")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        title = info.get('title', 'فيديو')
-        await status_message.edit_text(f"<b>{title}</b>\n\nاختر الصيغة التي تريد تحميلها:", reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+            for height in sorted_heights:
+                best_format = video_formats_by_height[height]
+                
+                # حساب الحجم الإجمالي (فيديو + صوت إذا لزم الأمر)
+                total_size = 0
+                
+                if best_format.get('acodec') == 'none' and best_audio:
+                    # صيغة فيديو فقط، نضيف حجم الصوت
+                    video_size = get_estimated_size(best_format, duration) or 0
+                    audio_size = get_estimated_size(best_audio, duration) or 0
+                    total_size = video_size + audio_size
+                    best_format['combined_format'] = f"{best_format['format_id']}+{best_audio['format_id']}"
+                else:
+                    # صيغة مدمجة (فيديو+صوت)
+                    total_size = get_estimated_size(best_format, duration) or 0
+                
+                # التحقق من أن حجم الملف لا يتجاوز حد الرفع
+                if total_size > 0 and total_size <= BOT_API_UPLOAD_LIMIT:
+                    size_str = format_bytes(total_size)
+                    # تخزين الحجم المحسوب للاستخدام لاحقاً
+                    best_format['calculated_size'] = total_size
+                    keyboard.append([InlineKeyboardButton(f"🎬 فيديو {height}p ({size_str})", callback_data=f"download:video:{height}:{update.message.message_id}")])
+                    available_formats[height] = best_format
+
+            if not keyboard:
+                await status_message.edit_text("❌ عذراً، لم يتم العثور على صيغ تحميل مدعومة لهذا الرابط.")
+                return
+
+            # تخزين معلومات الصيغ المتاحة في chat_data
+            original_message_id = update.message.message_id
+            context.chat_data[original_message_id] = {
+                'url': url, 
+                'formats': available_formats,
+                'duration': duration,
+                'best_audio': best_audio
+            }
+
+            # إضافة زر الإلغاء
+            keyboard.append([InlineKeyboardButton("❌ إلغاء", callback_data=f"cancel:{original_message_id}")])
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            title = info.get('title', 'فيديو')
+            duration_str = format_duration(duration) if duration else "غير معروف"
+            
+            await status_message.edit_text(
+                f"<b>{title}</b>\n⏱️ المدة: {duration_str}\n\nاختر الصيغة التي تريد تحميلها:", 
+                reply_markup=reply_markup, 
+                parse_mode=ParseMode.HTML
+            )
 
     except Exception as e:
         # التحقق من نوع الخطأ لتوفير رسالة أوضح للمستخدم
@@ -507,7 +582,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text(text="❌ لم يتم العثور على الصيغة المطلوبة.")
                 return
                 
-            format_id = selected_format.get('format_id', '')
+            # استخدام format_id المحسوب مسبقاً إن وجد
+            if 'combined_format' in selected_format:
+                format_id = selected_format['combined_format']
+            else:
+                format_id = selected_format.get('format_id', '')
+            
+            # استخدام الحجم المحسوب مسبقاً
+            file_size = selected_format.get('calculated_size')
             
         except (KeyError, TypeError, ValueError) as e:
             logging.error(f"خطأ في استرجاع الصيغة: {e}")
@@ -535,15 +617,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # إرسال الملف بدون معامل progress
             with open(filepath, 'rb') as file:
                 if downloaded_type == 'video':
-                    progress = UploadProgress(filepath, query.message)
                     await context.bot.send_video(
                         chat_id=query.message.chat_id, 
-                        video=open(filepath, 'rb'), 
+                        video=file, 
                         caption=f"تم التحميل بواسطة @{context.bot.username}", 
                         supports_streaming=True,
                         read_timeout=60,
-                        write_timeout=60,
-                        # لسوء الحظ، send_video لا يدعم progress callback في هذه النسخة
+                        write_timeout=60
                     )
                 elif downloaded_type == 'audio':
                     await context.bot.send_audio(
@@ -573,8 +653,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # تنظيف chat_data
             context.chat_data.pop(original_message_id, None)
-
-# --- نظام محادثة لوحة تحكم الأدمن ---
 
 # تعريف الحالات
 ADMIN_PANEL, AWAITING_BROADCAST, AWAITING_CHANNEL_ID = range(3)
