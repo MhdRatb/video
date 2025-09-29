@@ -10,34 +10,44 @@ from telegram.constants import ParseMode
 from telegram.error import TelegramError
 
 # ==============================================================================
-# ١. الإعدادات
+# ١. الإعدادات (بديل لـ config.py)
 # ==============================================================================
 dotenv.load_dotenv()
+# ضع هنا توكن البوت الذي حصلت عليه من BotFather
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
+# ضع هنا معرف حسابك العددي على تليجرام (يمكنك الحصول عليه من @userinfobot)
 ADMIN_IDS_STR = os.getenv("ADMIN_IDS", "")
 ADMIN_IDS = [int(admin_id) for admin_id in ADMIN_IDS_STR.split(',') if admin_id]
 
+# اسم ملف قاعدة البيانات. سيتم تخزينه في مسار ثابت على Railway
+# إذا لم يتم تحديد مسار، سيستخدم المسار المحلي للتجربة
 DATABASE_PATH = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
 DATABASE_NAME = os.path.join(DATABASE_PATH, "bot_data.db") if DATABASE_PATH else "bot_data.db"
 
 if not BOT_TOKEN:
     raise ValueError("لم يتم العثور على متغير البيئة BOT_TOKEN. يرجى إضافته.")
 
+# الحد الأقصى للرفع عبر واجهة برمجة التطبيقات القياسية لتليجرام (50 ميجابايت)
 BOT_API_UPLOAD_LIMIT = 50 * 1024 * 1024
 
 # ==============================================================================
-# ٢. دوال قاعدة البيانات
+# ٢. دوال قاعدة البيانات (بديل لـ database.py)
 # ==============================================================================
 
 def init_db():
+    """
+    يقوم بإنشاء الجداول في قاعدة البيانات إذا لم تكن موجودة.
+    """
     with sqlite3.connect(DATABASE_NAME) as conn:
         cursor = conn.cursor()
+        # جدول لتخزين المستخدمين
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users ( 
                 user_id INTEGER PRIMARY KEY
             )
         ''')
+        # جدول لتخزين الإعدادات (مثل قناة الاشتراك الإجباري)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
@@ -47,30 +57,45 @@ def init_db():
         conn.commit()
 
 def add_user(user_id: int):
+    """
+    يضيف مستخدمًا جديدًا إلى قاعدة البيانات إذا لم يكن موجودًا.
+    """
     with sqlite3.connect(DATABASE_NAME) as conn:
         cursor = conn.cursor()
         cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
         conn.commit()
 
 def get_all_users() -> list[int]:
+    """
+    يعيد قائمة بجميع معرفات المستخدمين المسجلين في البوت.
+    """
     with sqlite3.connect(DATABASE_NAME) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT user_id FROM users")
         return [row[0] for row in cursor.fetchall()]
 
 def get_user_count() -> int:
+    """
+    يعيد عدد المستخدمين الكلي.
+    """
     with sqlite3.connect(DATABASE_NAME) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM users")
         return cursor.fetchone()[0]
 
 def set_setting(key: str, value: str):
+    """
+    يضبط قيمة مفتاح معين في جدول الإعدادات (مثل قناة الاشتراك).
+    """
     with sqlite3.connect(DATABASE_NAME) as conn:
         cursor = conn.cursor()
         cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
         conn.commit()
 
 def get_setting(key: str) -> str | None:
+    """
+    يجلب قيمة مفتاح معين من جدول الإعدادات.
+    """
     with sqlite3.connect(DATABASE_NAME) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
@@ -78,13 +103,11 @@ def get_setting(key: str) -> str | None:
         return result[0] if result else None
 
 # ==============================================================================
-# ٣. الدوال المساعدة - بدون كوكيز نهائياً
+# ٣. الدوال المساعدة (بديل لـ helpers.py)
 # ==============================================================================
 
 def get_ydl_opts(media_type='video'):
-    """
-    إرجاع إعدادات yt-dlp بدون أي كوكيز.
-    """
+    """إرجاع إعدادات yt-dlp بدون أي كوكيز."""
     base_opts = {
         'outtmpl': 'downloads/%(title).100s-%(id)s.%(ext)s',
         'noplaylist': True,
@@ -98,7 +121,6 @@ def get_ydl_opts(media_type='video'):
         'retries': 10,
         'fragment_retries': 10,
         'skip_unavailable_fragments': True,
-        # إعدادات متقدمة لدعم جميع المنصات بدون كوكيز
         'extract_flat': False,
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -108,21 +130,12 @@ def get_ydl_opts(media_type='video'):
             'Accept-Charset': 'ISO-8859-1,utf-8;q=0.7,*;q=0.7',
             'Referer': 'https://www.google.com/',
         },
-        # إعدادات إضافية لدعم المنصات بدون كوكيز
         'compat_opts': ['no-youtube-unavailable'],
         'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'web'],
-            },
-            'instagram': {
-                'extract_flat': True,
-            },
-            'tiktok': {
-                'api': ['m', 'web'],
-            },
-            'twitter': {
-                'cards': True,
-            },
+            'youtube': {'player_client': ['android', 'web']},
+            'instagram': {'extract_flat': True},
+            'tiktok': {'api': ['m', 'web']},
+            'twitter': {'cards': True},
         },
     }
     
@@ -135,7 +148,7 @@ def get_ydl_opts(media_type='video'):
                 'preferedformat': 'mp4',
             }],
         })
-    else:  # audio
+    else:
         base_opts.update({
             'format': 'bestaudio/best',
             'postprocessors': [{
@@ -148,6 +161,7 @@ def get_ydl_opts(media_type='video'):
     return base_opts
 
 def format_duration(seconds: float) -> str:
+    """يحول المدة من ثوانٍ إلى تنسيق مقروء (س:د:ث)."""
     if not seconds:
         return "غير معروف"
     
@@ -159,8 +173,9 @@ def format_duration(seconds: float) -> str:
         return f"{hours}:{minutes:02d}:{secs:02d}"
     else:
         return f"{minutes}:{secs:02d}"
-
 def _is_better_format(new_format: dict, current_format: dict) -> bool:
+    """يقارن بين صيغتين ويحدد أيهما أفضل."""
+    # الأفضلية للصيغ المدمجة (فيديو+صوت)
     new_has_audio = new_format.get('acodec') != 'none'
     current_has_audio = current_format.get('acodec') != 'none'
     
@@ -169,12 +184,14 @@ def _is_better_format(new_format: dict, current_format: dict) -> bool:
     elif not new_has_audio and current_has_audio:
         return False
     
+    # إذا كانتا مدمجتين أو غير مدمجتين، قارن بمعدل البت
     new_tbr = new_format.get('tbr', 0) or 0
     current_tbr = current_format.get('tbr', 0) or 0
     
     return new_tbr > current_tbr
 
 def format_bytes(size):
+    """يحول البايت إلى صيغة مقروءة (KB, MB, GB) بدقة."""
     if size is None or size <= 0:
         return "غير معروف"
     
@@ -186,49 +203,21 @@ def format_bytes(size):
         size /= power
         n += 1
     
-    if n == 0:
+    if n == 0:  # بايت
         return f"{size:.0f} {power_labels[n]}"
-    elif size < 10:
+    elif size < 10:  # أرقام صغيرة
         return f"{size:.2f} {power_labels[n]}"
-    elif size < 100:
+    elif size < 100:  # أرقام متوسطة
         return f"{size:.1f} {power_labels[n]}"
-    else:
+    else:  # أرقام كبيرة
         return f"{size:.0f} {power_labels[n]}"
 
 def generate_progress_bar(percentage: float) -> str:
+    """ينشئ شريط تقدم نصي."""
     filled_length = int(10 * percentage / 100)
     bar = '█' * filled_length + '░' * (10 - filled_length)
     return f"[{bar}] {percentage:.1f}%"
 
-def get_supported_domains():
-    return [
-        'youtube.com', 'youtu.be',
-        'instagram.com', 'instagr.am',
-        'tiktok.com', 'vm.tiktok.com',
-        'twitter.com', 'x.com',
-        'facebook.com', 'fb.watch',
-        'reddit.com',
-        'twitch.tv',
-        'vimeo.com',
-        'dailymotion.com',
-        'soundcloud.com',
-        'pinterest.com',
-        'likee.video',
-        'ok.ru',
-        'bilibili.com',
-        'rutube.ru',
-        'linkedin.com',
-        'snapchat.com',
-        'pinterest.com',
-        'rumble.com',
-        '9gag.com',
-    ]
-
-def is_supported_url(url: str) -> bool:
-    import re
-    domains = '|'.join(re.escape(domain) for domain in get_supported_domains())
-    pattern = f'https?://(?:[^/]+\\.)?(?:{domains})/\\S+'
-    return bool(re.match(pattern, url))
 
 async def download_media(
     url: str, 
@@ -237,18 +226,23 @@ async def download_media(
     status_message: Message, 
     context: ContextTypes.DEFAULT_TYPE
 ) -> tuple[str | None, str | None]:
+    """
+    يقوم بتحميل الفيديو أو الصوت من الرابط المحدد.
+    يدعم جميع المواقع المتاحة في yt-dlp.
+    """
     
     if not os.path.exists('downloads'):
         os.makedirs('downloads')
     
     opts = get_ydl_opts(media_type)
     
+    # إضافة format_id إذا كان موجوداً
     if format_id and format_id != 'audio':
         opts['format'] = format_id
 
     try:
         await status_message.edit_text("⏳ جارٍ التحميل... يرجى الانتظار")
-        
+        # تشغيل yt-dlp في منفذ منفصل
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = await asyncio.get_event_loop().run_in_executor(
                 None, 
@@ -260,6 +254,7 @@ async def download_media(
     except Exception as e:
         logging.error(f"فشل تحميل {media_type} من {url}: {e}", exc_info=True)
         
+        # رسائل خطأ أكثر وضوحاً
         error_msg = f"❌ فشل التحميل من الرابط"
         if "Unsupported URL" in str(e):
             error_msg += "\n⚠️ الرابط غير مدعوم أو الموقع غير متاح"
@@ -268,24 +263,26 @@ async def download_media(
         elif "Geo restricted" in str(e):
             error_msg += "\n🌍 المحتوى غير متاح في منطقتك الجغرافية"
         elif "Sign in" in str(e):
-            error_msg += "\n🔐 يتطلب تسجيل الدخول أو الاشتراك"
+            error_msg += "\n🔐 يتطلب تسجيل الدخول"
         elif "Video unavailable" in str(e):
-            error_msg += "\n🚫 الفيديو غير متاح أو تم حذفه"
-        elif "This video is not available" in str(e):
-            error_msg += "\n🚫 هذا الفيديو غير متاح في منطقتك"
+            error_msg += "\n🚫 الفيديو غير متاح"
         else:
             error_msg += f"\n📋 الخطأ: {str(e)}"
             
         await status_message.edit_text(error_msg)
         return None, None
 
+    # البحث عن الملف الذي تم تحميله
     try:
+        # الحصول على اسم الملف المتوقع
         expected_filename = ydl.prepare_filename(info)
         expected_path = os.path.join('downloads', os.path.basename(expected_filename))
         
+        # التحقق من وجود الملف بالامتداد المتوقع أولاً
         if os.path.exists(expected_path):
             return expected_path, media_type
         
+        # إذا لم يوجد، ابحث عن أي ملف في مجلد التنزيلات
         video_id = info.get('id', '') or 'unknown'
         for filename in os.listdir('downloads'):
             if video_id in filename:
@@ -294,6 +291,7 @@ async def download_media(
                     logging.info(f"تم العثور على الملف: {filepath}")
                     return filepath, media_type
         
+        # محاولة أخيرة: احصل على أحدث ملف في المجلد
         download_files = [f for f in os.listdir('downloads') 
                          if os.path.isfile(os.path.join('downloads', f))]
         if download_files:
@@ -311,27 +309,36 @@ async def download_media(
         return None, None
     
 def get_estimated_size(fmt: dict, duration: float | None) -> float | None:
+    """
+    إصدار مبسط لحساب الحجم بدون تعقيدات.
+    """
     if not fmt:
         return None
     
+    # المحاولة الأولى: filesize المباشر
     size = fmt.get('filesize')
     if size and size > 0:
         return size
     
+    # المحاولة الثانية: filesize_approx
     size = fmt.get('filesize_approx')
     if size and size > 0:
         return size
     
+    # المحاولة الثالثة: الحساب من tbr
     if duration and fmt.get('tbr'):
         tbr = fmt.get('tbr', 0)
         if tbr > 0:
+            # tbr (kbps) → bytes = (tbr * 1000 / 8) * duration
             return (tbr * 1000 / 8) * duration
     
+    # المحاولة الرابعة: إذا كان هناك معدل بت للصوت فقط
     if duration and fmt.get('vcodec') == 'none' and fmt.get('abr'):
         abr = fmt.get('abr', 0)
         if abr > 0:
             return (abr * 1000 / 8) * duration
     
+    # إذا فشلت جميع المحاولات
     return None
 
 class UploadProgress:
@@ -343,9 +350,11 @@ class UploadProgress:
         self._last_percentage = -1
 
     async def update_progress(self, current: int, total: int):
+        """يتم استدعاؤها من قبل مكتبة تليجرام أثناء الرفع."""
         percentage = (current / total) * 100
         current_time = asyncio.get_event_loop().time()
 
+        # تحديث كل 3 ثوان أو إذا زادت النسبة 10%
         if current_time - self._last_update_time > 3 or percentage - self._last_percentage >= 10:
             try:
                 progress_bar = generate_progress_bar(percentage)
@@ -357,20 +366,25 @@ class UploadProgress:
             except TelegramError as e:
                 if "Message is not modified" not in str(e):
                     logger.warning(f"خطأ أثناء تحديث شريط تقدم الرفع: {e}")
-
 # ==============================================================================
-# ٤. منطق البوت الرئيسي
+# ٤. منطق البوت الرئيسي (ملف bot.py سابقاً)
 # ==============================================================================
 
+# إعداد تسجيل الأحداث لعرض معلومات مفيدة أثناء التشغيل
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
+# --- دوال مساعدة ---
+
 async def is_user_subscribed(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """
+    للتحقق مما إذا كان المستخدم مشتركًا في القناة الإجبارية.
+    """
     channel_id = get_setting('force_channel')
     if not channel_id:
-        return True
+        return True  # لا توجد قناة إجبارية، لذا نعتبره مشتركًا
 
     try:
         member = await context.bot.get_chat_member(chat_id=channel_id, user_id=user_id)
@@ -379,10 +393,13 @@ async def is_user_subscribed(user_id: int, context: ContextTypes.DEFAULT_TYPE) -
         logger.error(f"خطأ في التحقق من اشتراك المستخدم {user_id} في القناة {channel_id}: {e}")
         return False
 
+# --- أوامر المستخدمين ---
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
 
+    # إضافة التحقق من الاشتراك هنا أيضاً
     if not await is_user_subscribed(user_id, context):
         channel_id = get_setting('force_channel')
         channel_link = f"https://t.me/{channel_id.lstrip('@')}" if channel_id else ""
@@ -393,57 +410,33 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     add_user(user.id)
-    
-    supported_platforms = "\n".join([f"• {domain}" for domain in get_supported_domains()[:12]])
-    
     await update.message.reply_html(
-        f"أهلاً بك يا {user.mention_html()}! 🚀\n\n"
-        "أنا بوت تحميل الفيديوهات من مختلف المنصات الاجتماعية.\n\n"
-        "<b>المنصات المدعومة:</b>\n"
-        f"{supported_platforms}\n\n"
-        "<b>🔄 الطريقة:</b>\n"
-        "فقط أرسل رابط الفيديو وسأحمله لك فوراً!\n\n"
-        "<b>⚡ بدون حاجة لتسجيل الدخول أو كوكيز</b>\n\n"
-        "استخدم /supported لعرض جميع المنصات"
+        f"أهلاً بك يا {user.mention_html()}!\n\n"
+        "أنا بوت تحميل الفيديوهات. أرسل لي أي رابط فيديو وسأقوم بتحميله وإرساله لك."
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    supported_platforms = "\n".join([f"• {domain}" for domain in get_supported_domains()[:10]])
-    
     help_text = (
-        "<b>🚀 بوت تحميل الفيديوهات</b>\n\n"
-        "<b>المنصات المدعومة:</b>\n"
-        f"{supported_platforms}\n\n"
+        "<b>مرحباً بك في بوت تحميل الفيديوهات!</b>\n\n"
         "<b>كيفية الاستخدام:</b>\n"
-        "• أرسل رابط الفيديو\n"
-        "• اختر الجودة المطلوبة\n"
-        "• انتظر حتى يكتمل التحميل\n\n"
-        "<b>⚡ المميزات:</b>\n"
-        "• يدعم +20 منصة\n"
-        "• بدون حاجة لتسجيل الدخول\n"
-        "• خيارات متعددة للجودة\n"
-        "• دعم الفيديوهات الطويلة\n\n"
-        "<b>الأوامر:</b>\n"
-        "/start - بدء الاستخدام\n"
-        "/help - المساعدة\n"
-        "/supported - المنصات المدعومة"
+        "فقط أرسل رابط الفيديو الذي تريد تحميله.\n\n"
+        "<b>الأوامر المتاحة:</b>\n"
+        "/start - بدء استخدام البوت\n"
+        "/help - عرض هذه الرسالة\n\n"
+        "<b>لوحة تحكم الأدمن (خاصة بالمسؤولين):</b>\n"
+        "/admin - لفتح لوحة التحكم التفاعلية"
     )
     await update.message.reply_html(help_text)
 
-async def supported_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    supported_platforms = "\n".join([f"• {domain}" for domain in get_supported_domains()])
-    
-    await update.message.reply_text(
-        f"<b>🌐 جميع المنصات المدعومة:</b>\n\n{supported_platforms}\n\n"
-        "يمكنك إرسال رابط من أي من هذه المنصات وسأقوم بتحميل المحتوى لك فوراً! 🚀",
-        parse_mode=ParseMode.HTML
-    )
-
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # التحقق من وجود مستخدم مرتبط بالرسالة
     if not update.effective_user:
+        logger.info("تم استلام رسالة بدون مستخدم (قد تكون من قناة أو مشرف مجهول)، سيتم تجاهلها.")
         return
 
     user_id = update.effective_user.id
+    
+    # إضافة المستخدم إلى قاعدة البيانات عند أول تفاعل
     add_user(user_id)
     
     if not await is_user_subscribed(user_id, context):
@@ -456,123 +449,135 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     url = update.message.text
-    
     if not (url.startswith('http://') or url.startswith('https://')):
         await update.message.reply_text("الرجاء إرسال رابط صالح.")
-        return
-    
-    if not is_supported_url(url):
-        await update.message.reply_text(
-            "❌ هذا الرابط غير مدعوم حالياً.\n\n"
-            "استخدم /supported لعرض قائمة المنصات المدعومة."
-        )
         return
 
     status_message = await update.message.reply_text("⏳ جارٍ جلب معلومات الفيديو...")
 
     try:
-        info_opts = get_ydl_opts('video')
-        info_opts.update({'extract_flat': False, 'ignoreerrors': True})
+            info_opts = get_ydl_opts('video')
+            info_opts.update({'extract_flat': False, 'ignoreerrors': True})
+            
+            # جلب المعلومات فقط بدون تحميل
+            with yt_dlp.YoutubeDL(info_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+            
+            if not info:
+                await status_message.edit_text("❌ فشل جلب معلومات الفيديو. قد يكون المحتوى خاصاً، محذوفاً، أو يتطلب تسجيل الدخول.")
+                return
+            # إذا كان الرابط لقائمة تشغيل، خذ أول فيديو
+            if '_type' in info and info['_type'] == 'playlist':
+                if info['entries']:
+                    info = info['entries'][0]
+                else:
+                    await status_message.edit_text("❌ قائمة التشغيل فارغة")
+                    return
 
-        with yt_dlp.YoutubeDL(info_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-        # -->> أضف هذا التحقق هنا <<--
-        if not info:
-            await status_message.edit_text("❌ فشل جلب معلومات الفيديو. قد يكون المحتوى خاصاً، محذوفاً، أو يتطلب تسجيل الدخول.")
-            return
-        
-        if '_type' in info and info['_type'] == 'playlist':
-            if info['entries']:
-                info = info['entries'][0]
-            else:
-                await status_message.edit_text("❌ قائمة التشغيل فارغة")
+            duration = info.get('duration')
+
+            # --- منطق جديد دقيق لحساب الأحجام ---
+            keyboard = []
+            available_formats = {} # لتخزين أفضل صيغة لكل دقة
+            
+            # البحث عن أفضل صيغة صوت M4A
+            best_audio = None
+            audio_formats = [f for f in info.get('formats', []) 
+                            if f.get('vcodec') == 'none' and f.get('acodec') != 'none']
+            
+            if audio_formats:
+                # اختيار أفضل صيغة صوت (أعلى جودة)
+                best_audio = max(audio_formats, 
+                            key=lambda x: x.get('abr', 0) or x.get('tbr', 0) or 0)
+                
+                # حساب الحجم بدقة
+                audio_size = get_estimated_size(best_audio, duration)
+                size_str = format_bytes(audio_size)
+                
+                # التحقق من حجم الملف
+                if audio_size and audio_size > BOT_API_UPLOAD_LIMIT:
+                    keyboard.append([InlineKeyboardButton(f"🎵 صوت M4A ({size_str}) - حجم كبير", callback_data="noop")])
+                else:
+                    # إذا كان الحجم مناسباً، يتم إضافة الزر
+                    keyboard.append([InlineKeyboardButton(f"🎵 صوت M4A ({size_str})", callback_data=f"download:audio:audio:{update.message.message_id}")])
+                    available_formats['audio'] = best_audio
+
+            # --- منطق دقيق للفيديو ---
+            video_formats_by_height = {} # قاموس لتخزين أفضل صيغة لكل دقة
+            
+            for f in info.get('formats', []):
+                # تجاهل الصيغ التي لا تحتوي على فيديو
+                if f.get('vcodec') == 'none' or not f.get('height'):
+                    continue
+
+                height = f['height']
+                current_format = video_formats_by_height.get(height)
+                
+                # اختيار أفضل صيغة لكل دقة
+                if not current_format or _is_better_format(f, current_format):
+                    video_formats_by_height[height] = f
+
+            # فرز الدقات المتاحة من الأعلى إلى الأقل
+            sorted_heights = sorted(video_formats_by_height.keys(), reverse=True)
+
+            for height in sorted_heights:
+                best_format = video_formats_by_height[height]
+                
+                # حساب الحجم الإجمالي (فيديو + صوت إذا لزم الأمر)
+                total_size = 0
+                
+                if best_format.get('acodec') == 'none' and best_audio:
+                    # صيغة فيديو فقط، نضيف حجم الصوت
+                    video_size = get_estimated_size(best_format, duration) or 0
+                    audio_size = get_estimated_size(best_audio, duration) or 0
+                    total_size = video_size + audio_size
+                    best_format['combined_format'] = f"{best_format['format_id']}+{best_audio['format_id']}"
+                else:
+                    # صيغة مدمجة (فيديو+صوت)
+                    total_size = get_estimated_size(best_format, duration) or 0
+                
+                size_str = format_bytes(total_size)
+                
+                # التحقق من حجم الملف
+                if total_size > 0 and total_size > BOT_API_UPLOAD_LIMIT:
+                    keyboard.append([InlineKeyboardButton(f"🎬 فيديو {height}p ({size_str}) - حجم كبير", callback_data="noop")])
+                elif total_size > 0:
+                    # إذا كان الحجم مناسباً، يتم إضافة الزر
+                    # تخزين الحجم المحسوب للاستخدام لاحقاً
+                    best_format['calculated_size'] = total_size
+                    keyboard.append([InlineKeyboardButton(f"🎬 فيديو {height}p ({size_str})", callback_data=f"download:video:{height}:{update.message.message_id}")])
+                    available_formats[height] = best_format
+
+            if not keyboard:
+                await status_message.edit_text("❌ لم يتم العثور على صيغ تحميل مدعومة.")
                 return
 
-        duration = info.get('duration')
+            # تخزين معلومات الصيغ المتاحة في chat_data
+            original_message_id = update.message.message_id
+            context.chat_data[original_message_id] = {
+                'url': url, 
+                'formats': available_formats,
+                'duration': duration,
+                'best_audio': best_audio
+            }
 
-        keyboard = []
-        available_formats = {}
-        
-        best_audio = None
-        audio_formats = [f for f in info.get('formats', []) 
-                        if f.get('vcodec') == 'none' and f.get('acodec') != 'none']
-        
-        if audio_formats:
-            best_audio = max(audio_formats, 
-                        key=lambda x: x.get('abr', 0) or x.get('tbr', 0) or 0)
+            # إضافة زر الإلغاء
+            keyboard.append([InlineKeyboardButton("❌ إلغاء", callback_data=f"cancel:{original_message_id}")])
+            reply_markup = InlineKeyboardMarkup(keyboard)
             
-            audio_size = get_estimated_size(best_audio, duration)
-            size_str = format_bytes(audio_size)
+            title = info.get('title', 'فيديو')
+            duration_str = format_duration(duration) if duration else "غير معروف"
             
-            if audio_size and audio_size > BOT_API_UPLOAD_LIMIT:
-                keyboard.append([InlineKeyboardButton(f"🎵 صوت M4A ({size_str}) - حجم كبير", callback_data="noop")])
-            else:
-                keyboard.append([InlineKeyboardButton(f"🎵 صوت M4A ({size_str})", callback_data=f"download:audio:audio:{update.message.message_id}")])
-                available_formats['audio'] = best_audio
-
-        video_formats_by_height = {}
-        
-        for f in info.get('formats', []):
-            if f.get('vcodec') == 'none' or not f.get('height'):
-                continue
-
-            height = f['height']
-            current_format = video_formats_by_height.get(height)
-            
-            if not current_format or _is_better_format(f, current_format):
-                video_formats_by_height[height] = f
-
-        sorted_heights = sorted(video_formats_by_height.keys(), reverse=True)
-
-        for height in sorted_heights:
-            best_format = video_formats_by_height[height]
-            
-            total_size = 0
-            
-            if best_format.get('acodec') == 'none' and best_audio:
-                video_size = get_estimated_size(best_format, duration) or 0
-                audio_size = get_estimated_size(best_audio, duration) or 0
-                total_size = video_size + audio_size
-                best_format['combined_format'] = f"{best_format['format_id']}+{best_audio['format_id']}"
-            else:
-                total_size = get_estimated_size(best_format, duration) or 0
-            
-            size_str = format_bytes(total_size)
-            
-            if total_size > 0 and total_size > BOT_API_UPLOAD_LIMIT:
-                keyboard.append([InlineKeyboardButton(f"🎬 فيديو {height}p ({size_str}) - حجم كبير", callback_data="noop")])
-            elif total_size > 0:
-                best_format['calculated_size'] = total_size
-                keyboard.append([InlineKeyboardButton(f"🎬 فيديو {height}p ({size_str})", callback_data=f"download:video:{height}:{update.message.message_id}")])
-                available_formats[height] = best_format
-
-        if not keyboard:
-            await status_message.edit_text("❌ عذراً، لم يتم العثور على صيغ تحميل مدعومة لهذا الرابط.")
-            return
-
-        original_message_id = update.message.message_id
-        context.chat_data[original_message_id] = {
-            'url': url, 
-            'formats': available_formats,
-            'duration': duration,
-            'best_audio': best_audio
-        }
-
-        keyboard.append([InlineKeyboardButton("❌ إلغاء", callback_data=f"cancel:{original_message_id}")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        title = info.get('title', 'فيديو')
-        duration_str = format_duration(duration) if duration else "غير معروف"
-        
-        await status_message.edit_text(
-            f"<b>{title}</b>\n⏱️ المدة: {duration_str}\n\nاختر الصيغة:", 
-            reply_markup=reply_markup, 
-            parse_mode=ParseMode.HTML
-        )
+            await status_message.edit_text(
+                f"<b>{title}</b>\n⏱️ المدة: {duration_str}\n\nاختر الصيغة:", 
+                reply_markup=reply_markup, 
+                parse_mode=ParseMode.HTML
+            )
 
     except Exception as e:
         logging.error(f"فشل في جلب معلومات الفيديو من {url}: {e}")
         
+        # رسائل خطأ محددة
         error_msg = "❌ حدث خطأ أثناء جلب المعلومات"
         if "Unsupported URL" in str(e):
             error_msg = "❌ هذا الرابط غير مدعوم"
@@ -586,7 +591,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             error_msg = f"❌ حدث خطأ: {str(e)}"
             
         await status_message.edit_text(error_msg)
-
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query.data == "noop":
@@ -595,6 +599,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     data = query.data
+    # استعادة البيانات: action, media_type, format_id, original_message_id
     parts = data.split(":")
     
     if len(parts) < 2:
@@ -614,71 +619,80 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         format_key = parts[2]
         original_message_id = int(parts[3])
 
+        # استرجاع بيانات الرابط والصيغ من chat_data
         media_info = context.chat_data.get(original_message_id)
         if not media_info:
-            await query.edit_message_text(text="❌ حدث خطأ. الرجاء إرسال الرابط مرة أخرى.")
+            await query.edit_message_text(text="❌ حدث خطأ. أعد إرسال الرابط.")
             return
 
         download_url = media_info.get('url')
+        user_id = query.from_user.id
 
+        # استرجاع الصيغة المطلوبة من chat_data
         try:
+            # format_key هو 'audio' أو رقم الدقة مثل '720'
             selected_format = media_info['formats'].get(format_key)
             if not selected_format:
+                # محاولة البحث بالمفتاح الرقمي
                 try:
                     selected_format = media_info['formats'].get(int(format_key))
                 except ValueError:
                     pass
             
             if not selected_format:
-                await query.edit_message_text(text="❌ لم يتم العثور على الصيغة المطلوبة.")
+                await query.edit_message_text(text="❌ لم يتم العثور على الصيغة.")
                 return
                 
+            # استخدام format_id المحسوب مسبقاً إن وجد
             if 'combined_format' in selected_format:
                 format_id = selected_format['combined_format']
             else:
                 format_id = selected_format.get('format_id', '')
             
         except (KeyError, TypeError, ValueError) as e:
+            logging.error(f"خطأ في استرجاع الصيغة: {e}")
             await query.edit_message_text(text="❌ حدث خطأ في معالجة الصيغة.")
             return
 
-        await query.edit_message_text(text="⏳ جارٍ التحميل... يرجى الانتظار")
-
-        file_path, actual_media_type = await download_media(
+        await query.edit_message_text(text="⏳ جارٍ التحميل...")
+        
+        # تحميل الوسائط
+        filepath, downloaded_type = await download_media(
             download_url, 
             media_type, 
             format_id, 
             query.message, 
             context
         )
-
-        if not file_path:
-            await query.edit_message_text(text="❌ فشل التحميل. الرجاء المحاولة مرة أخرى.")
+        
+        if not filepath:
+            await query.edit_message_text(text="❌ فشل التحميل. حاول مرة أخرى.")
             return
 
-        progress = UploadProgress(file_path, query.message)
+        progress = UploadProgress(filepath, query.message)
 
         try:
-            if actual_media_type == 'video':
+            file_size = os.path.getsize(filepath)
+            if downloaded_type == 'video':
                 await context.bot.send_video(
                     chat_id=query.message.chat_id,
-                    video=open(file_path, 'rb'),
+                    video=open(filepath, 'rb'),
                     supports_streaming=True,
                     read_timeout=60,
                     write_timeout=60,
                     connect_timeout=60,
                     progress=progress.update_progress,
-                    progress_args=(os.path.getsize(file_path),)
+                    progress_args=(file_size,)
                 )
             else:
                 await context.bot.send_audio(
                     chat_id=query.message.chat_id,
-                    audio=open(file_path, 'rb'),
+                    audio=open(filepath, 'rb'),
                     read_timeout=60,
                     write_timeout=60,
                     connect_timeout=60,
                     progress=progress.update_progress,
-                    progress_args=(os.path.getsize(file_path),)
+                    progress_args=(file_size,)
                 )
 
             await query.edit_message_text(text="✅ تم الرفع بنجاح!")
@@ -686,87 +700,209 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except TelegramError as e:
             error_message = f"❌ فشل الرفع: {str(e)}"
             if "File too large" in str(e):
-                error_message += "\n\nالملف كبير جداً للرفع عبر تليجرام (الحد الأقصى 50 ميجابايت)."
+                error_message += "\n\nالملف كبير جداً (الحد الأقصى 50 ميجابايت)."
             await query.edit_message_text(text=error_message)
         except Exception as e:
             await query.edit_message_text(text=f"❌ حدث خطأ غير متوقع: {str(e)}")
         finally:
-            try:
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-            except:
-                pass
+            # تنظيف الملفات المؤقتة
+            if filepath and os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                    logger.info(f"تم حذف الملف المؤقت: {filepath}")
+                except Exception as e:
+                    logger.error(f"خطأ في حذف الملف المؤقت: {e}")
+            
+            # تنظيف chat_data
+            context.chat_data.pop(original_message_id, None)
 
-        context.chat_data.pop(original_message_id, None)
+# تعريف الحالات
+ADMIN_PANEL, AWAITING_BROADCAST, AWAITING_CHANNEL_ID = range(3)
 
-# ==============================================================================
-# ٥. لوحة تحكم الأدمن (مبسطة)
-# ==============================================================================
-
-async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def admin_panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """نقطة الدخول لمحادثة الأدمن."""
     user_id = update.effective_user.id
     if user_id not in ADMIN_IDS:
-        await update.message.reply_text("❌ ليس لديك صلاحية الوصول إلى هذه الأداة.")
-        return
+        return ConversationHandler.END
 
     keyboard = [
-        [InlineKeyboardButton("📊 إحصائيات البوت", callback_data="admin_stats")],
-        [InlineKeyboardButton("📢 إرسال رسالة للمستخدمين", callback_data="admin_broadcast")],
-        [InlineKeyboardButton("⚙️ إعدادات القناة", callback_data="admin_channel")],
+        [InlineKeyboardButton("📊 الإحصائيات", callback_data="admin_stats")],
+        [InlineKeyboardButton("📢 إذاعة", callback_data="admin_broadcast")],
+        [InlineKeyboardButton("📺 ضبط القناة", callback_data="admin_setchannel")],
+        [InlineKeyboardButton("🗑️ حذف القناة", callback_data="admin_delchannel")],
         [InlineKeyboardButton("❌ إغلاق", callback_data="admin_close")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-
-    await update.message.reply_text(
-        "🔧 <b>لوحة تحكم الأدمن</b>\n\nاختر الإجراء:", 
-        reply_markup=reply_markup, 
-        parse_mode=ParseMode.HTML
-    )
-
-async def admin_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    user_id = query.from_user.id
-    if user_id not in ADMIN_IDS:
-        await query.edit_message_text(text="❌ ليس لديك صلاحية.")
-        return
-
-    data = query.data
-
-    if data == "admin_stats":
-        total_users = get_user_count()
-        await query.edit_message_text(
-            text=f"📊 <b>إحصائيات البوت</b>\n\n👥 إجمالي المستخدمين: <code>{total_users}</code>",
+    
+    # إذا كانت الرسالة جديدة، أرسل لوحة التحكم. إذا كانت تعديلاً، قم بتعديلها.
+    # نتحقق إذا كان هناك رسالة موجودة يمكن تعديلها (من ضغط زر)
+    if update.callback_query and update.callback_query.message:
+        await update.callback_query.edit_message_text(
+            "⚙️ <b>لوحة تحكم الأدمن</b>\n\nاختر الإجراء المطلوب:",
+            reply_markup=reply_markup,
             parse_mode=ParseMode.HTML
         )
-    elif data == "admin_close":
-        await query.message.delete()
+    else:
+        # إذا لم يكن، نرسل رسالة جديدة (عند بدء الأمر /admin أو العودة من عملية)
+        await update.message.reply_text(
+            "⚙️ <b>لوحة تحكم الأدمن</b>\n\nاختر الإجراء المطلوب:",
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.HTML
+        )
+    return ADMIN_PANEL
+
+async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """يعرض إحصائيات البوت."""
+    query = update.callback_query
+    await query.answer()
+    user_count = get_user_count()
+    await query.edit_message_text(
+        f"📊 <b>إحصائيات البوت</b>\n\n👥 عدد المستخدمين: {user_count}",
+        parse_mode=ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="admin_back_to_panel")]])
+    )
+    return ADMIN_PANEL
+
+async def admin_request_input(update: Update, context: ContextTypes.DEFAULT_TYPE, message: str, next_state: int) -> int:
+    """دالة مساعدة لطلب إدخال من الأدمن."""
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(
+        text=message,
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="admin_back_to_panel")]])
+    )
+    return next_state
+
+async def handle_set_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """يعالج إدخال معرف القناة."""
+    channel_id = update.message.text
+    if not channel_id.startswith('@'):
+        await update.message.reply_text("❌ خطأ: يجب أن يبدأ معرف القناة بـ @.")
+        await admin_panel_command(update, context)
+        return ADMIN_PANEL
+
+    try:
+        bot_member = await context.bot.get_chat_member(chat_id=channel_id, user_id=context.bot.id)
+        if not bot_member.status in ['administrator', 'creator']:
+             await update.message.reply_text("❌ خطأ: يجب أن يكون البوت مشرفًا في القناة أولاً.")
+             await admin_panel_command(update, context)
+             return ADMIN_PANEL
+    except TelegramError:
+        await update.message.reply_text("❌ خطأ: لا يمكن الوصول إلى القناة. تأكد من صحة المعرف وأن البوت عضو فيها.")
+        await admin_panel_command(update, context)
+        return ADMIN_PANEL
+
+    set_setting('force_channel', channel_id)
+    await update.message.reply_text(f"✅ تم تعيين قناة الاشتراك الإجباري إلى: {channel_id}")
+    await admin_panel_command(update, context)
+    return ADMIN_PANEL
+
+async def admin_del_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """يحذف قناة الاشتراك الإجباري."""
+    query = update.callback_query
+    await query.answer()
+    set_setting('force_channel', '')
+    await query.edit_message_text(
+        "✅ تم حذف قناة الاشتراك الإجباري بنجاح.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="admin_back_to_panel")]])
+    )
+    return ADMIN_PANEL
+
+async def handle_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """ينفذ الإذاعة."""
+    users = get_all_users()
+    sent_count = 0
+    failed_count = 0
+    status_msg = await update.message.reply_text(f"⏳ جارٍ بدء الإذاعة إلى `{len(users)}` مستخدم\.\.\.", parse_mode=ParseMode.MARKDOWN_V2)
+
+    for user_id in users:
+        try:
+            await context.bot.copy_message(chat_id=user_id, from_chat_id=update.message.chat_id, message_id=update.message.message_id)
+            sent_count += 1
+        except TelegramError as e:
+            logger.warning(f"فشل إرسال الإذاعة إلى {user_id}: {e}")
+            failed_count += 1
+    
+    await status_msg.edit_text(
+        f"✅ اكتملت الإذاعة!\n\n"
+        f"✔️ تم الإرسال بنجاح إلى: {sent_count} مستخدم\n"
+        f"❌ فشل الإرسال إلى: {failed_count} مستخدم"
+    )
+    await admin_panel_command(update, context)
+    return ADMIN_PANEL
+
+async def admin_close_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """يغلق لوحة تحكم الأدمن."""
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("تم إغلاق لوحة التحكم.")
+    return ConversationHandler.END
+
+async def admin_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """يلغي العملية الحالية ويعود للوحة التحكم."""
+    await update.message.reply_text("تم إلغاء العملية.")
+    await admin_panel_command(update, context)
+    return ADMIN_PANEL
 
 # ==============================================================================
-# ٦. الدالة الرئيسية
+# ٥. نقطة انطلاق البوت
 # ==============================================================================
 
 def main():
+    """
+    الدالة الرئيسية لتشغيل البوت.
+    """
+    # أولاً، قم بتهيئة قاعدة البيانات
     init_db()
-    
-    if not os.path.exists('downloads'):
-        os.makedirs('downloads')
 
+    # إنشاء تطبيق البوت
     application = Application.builder().token(BOT_TOKEN).build()
 
+    # إضافة معالجات الأوامر والرسائل
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("supported", supported_command))
-    application.add_handler(CommandHandler("admin", admin_command))
     
+    # --- محادثة الأدمن ---
+    admin_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("admin", admin_panel_command)],
+        states={
+            ADMIN_PANEL: [
+                CallbackQueryHandler(admin_stats, pattern="^admin_stats$"),
+                CallbackQueryHandler(lambda u, c: admin_request_input(u, c, "أرسل الآن الرسالة التي تريد إذاعتها...", AWAITING_BROADCAST), pattern="^admin_broadcast$"),
+                CallbackQueryHandler(lambda u, c: admin_request_input(u, c, "أرسل الآن معرف القناة (مثال: @username)...", AWAITING_CHANNEL_ID), pattern="^admin_setchannel$"),
+                CallbackQueryHandler(admin_del_channel, pattern="^admin_delchannel$"),
+                CallbackQueryHandler(admin_close_panel, pattern="^admin_close$"),
+                CallbackQueryHandler(admin_panel_command, pattern="^admin_back_to_panel$"),
+            ],
+            AWAITING_BROADCAST: [
+                MessageHandler(filters.ALL & ~filters.COMMAND, handle_broadcast),
+                CallbackQueryHandler(admin_panel_command, pattern="^admin_back_to_panel$"),
+            ],
+            AWAITING_CHANNEL_ID: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_set_channel),
+                CallbackQueryHandler(admin_panel_command, pattern="^admin_back_to_panel$"),
+            ],
+        },
+        fallbacks=[
+            CommandHandler("admin", admin_panel_command), # للسماح بإعادة تشغيل اللوحة
+            CommandHandler("cancel", admin_cancel),
+            CommandHandler("start", start_command) # للسماح بالخروج من وضع الأدمن
+        ],
+        per_message=False, # مهم لجعل أزرار الرجوع تعمل بشكل صحيح
+    )
+    application.add_handler(admin_conv_handler)
+
+    # معالج الرسائل النصية التي لا تبدأ بأمر
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    application.add_handler(CallbackQueryHandler(admin_button_callback, pattern="^admin_"))
+
+    # معالج ضغطات الأزرار
+    # استخدام نمط مختلف لكل نوع من الأزرار لتنظيم الكود
     application.add_handler(CallbackQueryHandler(button_callback, pattern="^(download|cancel|noop)"))
 
-    print("🚀 بوت تحميل الفيديوهات يعمل الآن بدون كوكيز!")
-    print("✅ يدعم أكثر من 20 منصة اجتماعية")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # بدء تشغيل البوت
+    logger.info("البوت قيد التشغيل...")
+    application.run_polling()
 
 if __name__ == "__main__":
+    # --- إعداد ملف الكوكيز ---
     main()
