@@ -189,10 +189,6 @@ def _is_better_format(new_format: dict, current_format: dict) -> bool:
     current_bitrate = current_format.get('vbr') or current_format.get('tbr') or 0
     return new_bitrate > current_bitrate
 
-    new_tbr = new_format.get('tbr', 0) or 0
-    current_tbr = current_format.get('tbr', 0) or 0
-    return new_tbr > current_tbr
-
 def format_bytes(size):
     """يحول البايت إلى صيغة مقروءة (KB, MB, GB) بدقة."""
     if size is None or size <= 0:
