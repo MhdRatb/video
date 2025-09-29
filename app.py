@@ -1,3 +1,5 @@
+# /path/to/your/project/video_bot.py
+
 import asyncio
 import logging
 import os
@@ -117,8 +119,25 @@ YDL_OPTS_VIDEO = {
     }],
     'restrictfilenames': True,
     'nooverwrites': True,
-    'noprogress': True,  # تعطيل progress الداخلي
-    'quiet': True,       # تقليل الإخراج
+    'noprogress': True,
+    'quiet': True,
+    # إعدادات لدعم المزيد من المواقع
+    'extract_flat': False,
+    'ignoreerrors': False,
+    'no_warnings': False,
+    'verbose': False,
+    # إعدادات الشبكة
+    'socket_timeout': 30,
+    'retries': 3,
+    'fragment_retries': 3,
+    'skip_unavailable_fragments': True,
+    # دعم المواقع المختلفة
+    'compat_opts': ['no-youtube-unavailable'],
+    'extractor_args': {
+        'youtube': {
+            'player_client': ['android', 'web'],
+        },
+    },
 }
 
 YDL_OPTS_AUDIO = {
@@ -132,9 +151,19 @@ YDL_OPTS_AUDIO = {
     }],
     'restrictfilenames': True,
     'nooverwrites': True,
-    'noprogress': True,  # تعطيل progress الداخلي
-    'quiet': True,       # تقليل الإخراج
+    'noprogress': True,
+    'quiet': True,
+    # نفس الإعدادات الإضافية
+    'extract_flat': False,
+    'ignoreerrors': False,
+    'no_warnings': False,
+    'verbose': False,
+    'socket_timeout': 30,
+    'retries': 3,
+    'fragment_retries': 3,
+    'skip_unavailable_fragments': True,
 }
+
 def format_duration(seconds: float) -> str:
     """يحول المدة من ثوانٍ إلى تنسيق مقروء (س:د:ث)."""
     if not seconds:
@@ -198,7 +227,7 @@ async def download_media(
 ) -> tuple[str | None, str | None]:
     """
     يقوم بتحميل الفيديو أو الصوت من الرابط المحدد.
-    إصدار مبسط تماماً بدون progress hooks.
+    يدعم جميع المواقع المتاحة في yt-dlp.
     """
     
     if not os.path.exists('downloads'):
@@ -214,22 +243,17 @@ async def download_media(
     if format_id and format_id != 'audio':
         opts['format'] = format_id
     
-    # إزالة أي progress hooks تماماً
-    if 'progress_hooks' in opts:
-        del opts['progress_hooks']
-    
-    # تعطيل أي hooks داخلية قد تسبب المشاكل
-    opts['noprogress'] = True
+    # إعدادات إضافية لدعم المواقع المختلفة
+    opts.update({
+        'extract_flat': False,  # تأكد من تحميل المعلومات الكاملة
+        'ignoreerrors': False,  # عرض الأخطاء للمساعدة في التشخيص
+    })
 
     try:
-        # تحديث الحالة
         await status_message.edit_text("⏳ جارٍ التحميل... يرجى الانتظار")
         
         # تشغيل yt-dlp في منفذ منفصل
         with yt_dlp.YoutubeDL(opts) as ydl:
-            # تعطيل أي logging داخلي لـ yt-dlp قد يتداخل
-            ydl.params['quiet'] = True
-            
             info = await asyncio.get_event_loop().run_in_executor(
                 None, 
                 lambda: ydl.extract_info(url, download=True)
@@ -238,8 +262,22 @@ async def download_media(
         await status_message.edit_text("✅ اكتمل التحميل، جارٍ الرفع...")
         
     except Exception as e:
-        logging.error(f"فشل تحميل {media_type}: {e}", exc_info=True)
-        await status_message.edit_text(f"❌ فشل التحميل: {str(e)}")
+        logging.error(f"فشل تحميل {media_type} من {url}: {e}", exc_info=True)
+        
+        # رسائل خطأ أكثر وضوحاً حسب نوع الموقع
+        error_msg = f"❌ فشل التحميل من الرابط"
+        if "Unsupported URL" in str(e):
+            error_msg += "\n⚠️ الرابط غير مدعوم أو الموقع غير متاح"
+        elif "Private video" in str(e):
+            error_msg += "\n🔒 الفيديو خاص أو محمي بكلمة مرور"
+        elif "Geo restricted" in str(e):
+            error_msg += "\n🌍 المحتوى غير متاح في منطقتك الجغرافية"
+        elif "Sign in" in str(e):
+            error_msg += "\n🔐 يتطلب تسجيل الدخول أو الاشتراك"
+        else:
+            error_msg += f"\n📋 الخطأ: {str(e)}"
+            
+        await status_message.edit_text(error_msg)
         return None, None
 
     # البحث عن الملف الذي تم تحميله
@@ -252,18 +290,18 @@ async def download_media(
         if os.path.exists(expected_path):
             return expected_path, media_type
         
-        # إذا لم يوجد، ابحث عن أي ملف في مجلد التنزيلات ينتهي بـ id الفيديو
-        video_id = info.get('id', '')
-        if video_id:
-            for filename in os.listdir('downloads'):
-                if video_id in filename:
-                    filepath = os.path.join('downloads', filename)
-                    if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
-                        logging.info(f"تم العثور على الملف: {filepath}")
-                        return filepath, media_type
+        # إذا لم يوجد، ابحث عن أي ملف في مجلد التنزيلات
+        video_id = info.get('id', '') or 'unknown'
+        for filename in os.listdir('downloads'):
+            if video_id in filename or 'unknown' in filename:
+                filepath = os.path.join('downloads', filename)
+                if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+                    logging.info(f"تم العثور على الملف: {filepath}")
+                    return filepath, media_type
         
         # محاولة أخيرة: احصل على أحدث ملف في المجلد
-        download_files = [f for f in os.listdir('downloads') if os.path.isfile(os.path.join('downloads', f))]
+        download_files = [f for f in os.listdir('downloads') 
+                         if os.path.isfile(os.path.join('downloads', f))]
         if download_files:
             latest_file = max([os.path.join('downloads', f) for f in download_files], 
                             key=os.path.getmtime)
@@ -277,7 +315,7 @@ async def download_media(
     except Exception as e:
         logging.error(f"خطأ في العثور على الملف المحمل: {e}")
         return None, None
-
+    
 def get_estimated_size(fmt: dict, duration: float | None) -> float | None:
     """
     يقدر حجم الصيغة بالبايت بدقة أكبر.
@@ -430,9 +468,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_message = await update.message.reply_text("⏳ جارٍ جلب معلومات الفيديو...")
 
     try:
+            # إعدادات أكثر مرونة لجلب المعلومات
+            info_opts = {
+                'noplaylist': True,
+                'ignoreerrors': False,
+                'no_warnings': False,
+                'extract_flat': False,  # جلب المعلومات الكاملة
+            }
+            
             # جلب المعلومات فقط بدون تحميل
-            with yt_dlp.YoutubeDL({'noplaylist': True}) as ydl:
+            with yt_dlp.YoutubeDL(info_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
+                
+            # إذا كان الرابط لقائمة تشغيل، خذ أول فيديو
+            if '_type' in info and info['_type'] == 'playlist':
+                if info['entries']:
+                    info = info['entries'][0]
+                else:
+                    await status_message.edit_text("❌ قائمة التشغيل فارغة")
+                    return
+
             duration = info.get('duration')
 
             # --- منطق جديد دقيق لحساب الأحجام ---
@@ -525,14 +580,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
     except Exception as e:
-        # التحقق من نوع الخطأ لتوفير رسالة أوضح للمستخدم
-        if isinstance(e, TelegramError) and "Button_data_invalid" in str(e):
-            logger.error(f"فشل في جلب معلومات الفيديو بسبب طول الرابط: {e}")
-            await status_message.edit_text("❌ حدث خطأ: الرابط الذي أرسلته طويل جدًا ولا يمكن معالجته. حاول استخدام رابط أقصر إذا أمكن.")
+        logging.error(f"فشل في جلب معلومات الفيديو من {url}: {e}")
+        
+        # رسائل خطأ محددة
+        if "Unsupported URL" in str(e):
+            error_msg = "❌ هذا الرابط غير مدعوم حالياً"
+        elif "No video formats found" in str(e):
+            error_msg = "❌ لم يتم العثور على صيغ فيديو متاحة"
+        elif "Private video" in str(e):
+            error_msg = "❌ الفيديو خاص أو محمي"
+        elif "Sign in" in str(e):
+            error_msg = "❌ يتطلب تسجيل الدخول أو الاشتراك"
         else:
-            logger.error(f"فشل في جلب معلومات الفيديو: {e}")
-        await status_message.edit_text("❌ حدث خطأ أثناء جلب معلومات الفيديو. قد يكون الرابط غير صالح أو غير مدعوم.")
-
+            error_msg = f"❌ حدث خطأ أثناء جلب المعلومات: {str(e)}"
+            
+        await status_message.edit_text(error_msg)
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
